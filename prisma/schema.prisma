@@ -1,0 +1,97 @@
+// Schema Prisma — sursa executabilă a schemei descrise în docs/data-model.md.
+// Orice tabel nou de business (facturare, stocuri etc.) NU se adaugă aici
+// direct — fiecare modul își definește propriile tabele, separate, care
+// referă doar tenantId. Acest fișier conține strict nucleul de entitlements
+// (construit o singură dată, la modulul 1, per docs/roadmap.md).
+
+generator client {
+  provider = "prisma-client-js"
+  // Fără `output` custom, în mod deliberat: se generează implicit în
+  // node_modules/.prisma/client, importabil ca `@prisma/client`. Un
+  // `output` custom în src/ complică inutil build-ul Nest (tsc nu copiază
+  // .js pre-generat în dist/) — vezi discuția din istoricul sesiunii.
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Firmele client (tenants).
+model Tenant {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  cui       String?  @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenantModules TenantModule[]
+  usageEvents   UsageEvent[]
+
+  @@map("tenants")
+}
+
+/// Catalogul de module disponibile pe platformă ('invoicing', 'inventory', ...).
+model Module {
+  code         String    @id
+  name         String
+  billingType  String    @map("billing_type") // CHECK: 'flat' | 'metered' | 'seat' — vezi migrarea SQL
+  releasedAt   DateTime? @map("released_at") @db.Date
+
+  plans         Plan[]
+  tenantModules TenantModule[]
+  usageEvents   UsageEvent[]
+
+  @@map("modules")
+}
+
+/// Planurile de preț pentru fiecare modul.
+model Plan {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  moduleCode     String  @map("module_code")
+  module         Module  @relation(fields: [moduleCode], references: [code])
+  name           String
+  priceCents     Int     @map("price_cents")
+  currency       String  @default("EUR")
+  includedQuota  Int?    @map("included_quota")
+  billingPeriod  String  @default("monthly") @map("billing_period")
+
+  tenantModules TenantModule[]
+
+  @@index([moduleCode])
+  @@map("plans")
+}
+
+/// Ce module are activ fiecare firmă — sursa de adevăr pentru acces
+/// (verificată exclusiv de ModuleGuard, activată exclusiv din webhook-uri
+/// de plată — vezi docs/data-model.md).
+model TenantModule {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId             String    @map("tenant_id") @db.Uuid
+  tenant               Tenant    @relation(fields: [tenantId], references: [id])
+  moduleCode           String    @map("module_code")
+  module               Module    @relation(fields: [moduleCode], references: [code])
+  planId               String    @map("plan_id") @db.Uuid
+  plan                 Plan      @relation(fields: [planId], references: [id])
+  status               String    // CHECK: 'trial' | 'active' | 'past_due' | 'canceled'
+  trialEndsAt          DateTime? @map("trial_ends_at") @db.Timestamptz(6)
+  currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz(6)
+  stripeSubscriptionId String?   @map("stripe_subscription_id")
+
+  @@unique([tenantId, moduleCode])
+  @@index([planId])
+  @@map("tenant_modules")
+}
+
+/// Evenimente de consum, pentru module taxate pe volum.
+model UsageEvent {
+  id         BigInt   @id @default(autoincrement())
+  tenantId   String   @map("tenant_id") @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  moduleCode String   @map("module_code")
+  module     Module   @relation(fields: [moduleCode], references: [code])
+  eventType  String   @map("event_type")
+  quantity   Int      @default(1)
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([tenantId, moduleCode])
+  @@map("usage_events")
+}

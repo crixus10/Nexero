@@ -18,3 +18,7 @@ coverage/
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+
+# client Prisma (generat implicit în node_modules/@prisma/client, deja
+# acoperit de node_modules/ de mai sus — recreat prin `prisma generate`,
+# rulat automat la `npm install` via scriptul postinstall)

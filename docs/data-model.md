@@ -4,6 +4,25 @@ Citit la nevoie de orice modul care adaugă o rută nouă protejată de plată,
 sau de `plan-guardian`/`logic-reviewer` la verificare. Sursa de adevăr
 pentru tot ce ține de „ce modul are activ o firmă”.
 
+**Implementare executabilă:** `prisma/schema.prisma` (ORM: Prisma, ales în
+locul TypeORM — migrări explicite versionate + client 100% tipat, vezi
+justificarea în istoricul sesiunii). Migrări:
+`prisma/migrations/20260826164140_init_entitlements/` (schema inițială) și
+`prisma/migrations/20260826165855_add_fk_indexes/` (indici lipsă pe FK-uri).
+SQL-ul de mai jos descrie conceptul; schema reală, cu `CHECK`-uri incluse,
+e în acele fișiere — nu le regenera de la zero, extinde-le cu
+`prisma migrate dev`.
+
+Generator: `prisma-client-js` (clasic, motor binar) — **deliberat, nu**
+noul generator `prisma-client` (WASM/ESM), care rupe Jest fără flag-uri
+experimentale și complică inutil build-ul Nest dacă i se dă un `output`
+custom în `src/`. Fără `output` în schema — clientul se generează implicit
+în `node_modules/@prisma/client`, importabil ca pachet normal
+(`import { PrismaClient } from '@prisma/client'`); regenerat automat la
+`npm install` (script `postinstall`) sau manual via `npx prisma generate`.
+Injectabil în orice modul via `PrismaService` (`src/prisma/`, modul
+global — nu reimporta manual).
+
 ## Tabele centrale
 
 ```sql

@@ -26,7 +26,10 @@ export default tseslint.config(
   },
   {
     rules: {
-      '@typescript-eslint/no-explicit-any': 'off',
+      // CLAUDE.md: niciun `any` fără comentariu care justifică de ce —
+      // păstrat ca 'warn' (nu 'off', cum vine default din Nest CLI) ca să
+      // fie măcar semnalat, nu ignorat silențios.
+      '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
       "prettier/prettier": ["error", { endOfLine: "auto" }],
