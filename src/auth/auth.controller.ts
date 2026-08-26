@@ -10,15 +10,18 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import { LoginDto } from './dto/login.dto';
-import { JwtAuthGuard } from './jwt-auth.guard';
 import type { AuthenticatedUser } from './jwt-payload.interface';
+import { Public } from './public.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  // ThrottlerGuard doar aici (nu global) — limitează brute-force pe
+  // @Public() — obligatoriu, altfel JwtAuthGuard (global) blochează
+  // login-ul înainte să apuce cineva să obțină un token.
+  // ThrottlerGuard rămâne local (nu global) — limitează brute-force pe
   // parole fără să afecteze alte rute viitoare fără discuție separată.
+  @Public()
   @UseGuards(ThrottlerGuard)
   @HttpCode(200)
   @Post('login')
@@ -26,9 +29,8 @@ export class AuthController {
     return this.authService.login(dto.email, dto.password);
   }
 
-  // Rută minimă de verificare — dovedește că JwtAuthGuard/@CurrentUser
-  // funcționează end-to-end, fără să fie ea însăși logică de business.
-  @UseGuards(JwtAuthGuard)
+  // Rută minimă de verificare — dovedește că JwtAuthGuard (acum global,
+  // fără @UseGuards explicit aici) + @CurrentUser funcționează end-to-end.
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser): AuthenticatedUser {
     return user;

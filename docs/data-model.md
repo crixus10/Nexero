@@ -118,6 +118,18 @@ business, nu stă în `src/modules/`).
 - **Orice guard viitor care are nevoie de `tenant_id` (inclusiv
   `ModuleGuard` de mai jos) îl citește din `req.user.tenantId`**, nu din
   `req.tenant.id` — convenția a fost fixată aici acum că auth chiar există.
+- **`JwtAuthGuard` e GLOBAL** (`APP_GUARD` în `auth.module.ts`) — rulează
+  implicit pe orice rută din orice modul, prezent sau viitor, fără să fie
+  nevoie de `@UseGuards` pe fiecare controller nou. O rută care chiar
+  trebuie să rămână neautentificată (ex: `/auth/login`, health-check-ul de
+  la `/`) se marchează explicit cu `@Public()`
+  (`src/auth/public.decorator.ts`) — altfel un modul de business nou e
+  protejat automat din prima zi, fără să se poată "uita" adăugarea unui
+  guard. **Ce garantează guard-ul**: dacă handler-ul rulează,
+  `req.user.tenantId` există și vine dintr-un JWT valid. **Ce NU
+  garantează**: că interogările Prisma din handler chiar filtrează după
+  el — regula #6 rămâne responsabilitatea codului din fiecare modul,
+  guard-ul e doar precondiția care o face posibilă, nu o aplică mecanic.
 - User de test pentru dezvoltare: `prisma/seed.ts`, rulat cu
   `npx prisma db seed` (configurat în `prisma7.config.ts`,
   `migrations.seed`). Idempotent — sigur de rulat de mai multe ori.

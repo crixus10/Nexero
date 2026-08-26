@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
 import ms, { type StringValue } from 'ms';
@@ -44,7 +45,15 @@ import { JwtAuthGuard } from './jwt-auth.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard],
+  providers: [
+    AuthService,
+    JwtAuthGuard,
+    // APP_GUARD → JwtAuthGuard rulează pe ORICE rută din aplicație (din
+    // orice modul, prezent sau viitor), nu doar pe cele cu @UseGuards
+    // explicit. useExisting (nu useClass) — o singură instanță, aceeași
+    // cu cea injectabilă direct sub tokenul JwtAuthGuard.
+    { provide: APP_GUARD, useExisting: JwtAuthGuard },
+  ],
   exports: [JwtAuthGuard],
 })
 export class AuthModule {}
