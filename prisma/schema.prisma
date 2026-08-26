@@ -1,8 +1,8 @@
 // Schema Prisma — sursa executabilă a schemei descrise în docs/data-model.md.
 // Orice tabel nou de business (facturare, stocuri etc.) NU se adaugă aici
 // direct — fiecare modul își definește propriile tabele, separate, care
-// referă doar tenantId. Acest fișier conține strict nucleul de entitlements
-// (construit o singură dată, la modulul 1, per docs/roadmap.md).
+// referă doar tenantId. Acest fișier conține strict nucleul (auth +
+// entitlements), construit o singură dată, la modulul 1, per docs/roadmap.md.
 
 generator client {
   provider = "prisma-client-js"
@@ -25,8 +25,25 @@ model Tenant {
 
   tenantModules TenantModule[]
   usageEvents   UsageEvent[]
+  users         User[]
 
   @@map("tenants")
+}
+
+/// Utilizatori care se autentifică (login), fiecare aparținând unei
+/// singure firme — un contabil care lucrează pentru mai mulți clienți
+/// (mai multe tenants) nu e acoperit de acest model minim; de revizuit
+/// când apare cerința reală (nu speculativ, per regulile din roadmap.md).
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId])
+  @@map("users")
 }
 
 /// Catalogul de module disponibile pe platformă ('invoicing', 'inventory', ...).

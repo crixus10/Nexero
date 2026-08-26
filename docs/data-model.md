@@ -7,8 +7,10 @@ pentru tot ce ține de „ce modul are activ o firmă”.
 **Implementare executabilă:** `prisma/schema.prisma` (ORM: Prisma, ales în
 locul TypeORM — migrări explicite versionate + client 100% tipat, vezi
 justificarea în istoricul sesiunii). Migrări:
-`prisma/migrations/20260826164140_init_entitlements/` (schema inițială) și
-`prisma/migrations/20260826165855_add_fk_indexes/` (indici lipsă pe FK-uri).
+`prisma/migrations/20260826164140_init_entitlements/` (schema inițială),
+`prisma/migrations/20260826165855_add_fk_indexes/` (indici lipsă pe FK-uri)
+și `prisma/migrations/20260826171424_add_users/` (tabela `users`, pentru
+autentificare).
 SQL-ul de mai jos descrie conceptul; schema reală, cu `CHECK`-uri incluse,
 e în acele fișiere — nu le regenera de la zero, extinde-le cu
 `prisma migrate dev`.
@@ -77,11 +79,61 @@ CREATE TABLE usage_events (
   quantity     INTEGER NOT NULL DEFAULT 1,
   occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Utilizatori care se autentifică (login) — vezi secțiunea Autentificare
+CREATE TABLE users (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      UUID NOT NULL REFERENCES tenants(id),
+  email          TEXT NOT NULL UNIQUE,
+  password_hash  TEXT NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
 Fiecare modul de business (facturi, stocuri etc.) are propriile tabele,
 separate de acestea, referind doar `tenant_id`. Nu adăuga coloane de
 business în `tenant_modules` — el rămâne strict despre acces și facturare.
+
+`users` e minimal, deliberat: un user aparține unei singure firme
+(`tenant_id`), nu mai multora. Nu acoperă cazul unui cabinet contabil care
+lucrează pentru mai mulți clienți (asta ar cere un tabel de asociere
+many-to-many) — de construit doar când apare cerința reală, per regulile
+din `docs/roadmap.md`, nu speculativ acum.
+
+## Autentificare (JWT)
+
+Implementare: `src/auth/` (nucleu, ca `src/prisma/` — nu e modul de
+business, nu stă în `src/modules/`).
+
+- `POST /auth/login` — primește `{ email, password }`, verifică parola cu
+  `bcryptjs` (`compare` contra `users.password_hash`), emite un JWT.
+- Payload JWT: `{ sub: user.id, tenantId: user.tenantId }` — `sub` e
+  convenția standard pentru id-ul subiectului.
+- Secretul de semnare vine din `JWT_SECRET` (env) — niciodată hardcodat.
+  Vezi `.env.example`.
+- `JwtAuthGuard` (`src/auth/jwt-auth.guard.ts`) verifică tokenul din header
+  `Authorization: Bearer <token>` cu `JwtService.verifyAsync` (fără
+  Passport — inutil pentru un caz atât de simplu) și atașează
+  `req.user = { userId, tenantId }`.
+- **Orice guard viitor care are nevoie de `tenant_id` (inclusiv
+  `ModuleGuard` de mai jos) îl citește din `req.user.tenantId`**, nu din
+  `req.tenant.id` — convenția a fost fixată aici acum că auth chiar există.
+- User de test pentru dezvoltare: `prisma/seed.ts`, rulat cu
+  `npx prisma db seed` (configurat în `prisma7.config.ts`,
+  `migrations.seed`). Idempotent — sigur de rulat de mai multe ori.
+- **Securitate**: `bcrypt.compare` rulează necondiționat, inclusiv pentru
+  email inexistent (contra un `DUMMY_HASH` fix) — altfel timpul de răspuns
+  diferă măsurabil și devine oracol de enumerare a email-urilor (deci a
+  firmelor client). Nu "optimiza" ramura de user inexistent să sară peste
+  compare.
+- **Rate limiting**: `ThrottlerGuard` (`@nestjs/throttler`) doar pe
+  `POST /auth/login`, 5 încercări/minut, cheie implicit pe `req.ip`.
+  **Necesită `app.set('trust proxy', 1)` în `src/main.ts`** — producția
+  (Hetzner, reverse proxy în față) altfel vede toate cererile venind de la
+  IP-ul proxy-ului, iar limita ajunge împărțită între toate firmele client
+  (un tenant care greșește parola blochează login-ul tuturor). Dacă
+  topologia reală de producție adaugă un hop în plus (ex: Cloudflare),
+  valoarea `1` trebuie recalibrată.
 
 ## Tiparul de verificare acces (guard)
 
@@ -100,7 +152,7 @@ export class ModuleGuard implements CanActivate {
     if (!mod) return true; // ruta nu ține de un modul plătit
 
     const req = ctx.switchToHttp().getRequest();
-    const tenantId = req.tenant.id; // setat de auth middleware
+    const tenantId = req.user.tenantId; // atașat de JwtAuthGuard, src/auth/
 
     const ent = await this.entitlements.getActive(
       tenantId, mod,
