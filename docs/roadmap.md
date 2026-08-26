@@ -12,6 +12,29 @@ aici (adaugă o linie „Decizie: ...” sub tabel).
 | 4 | CRM simplu | Cerere organică de la clienți care vor gestiune vânzări/lead-uri | upsell segment Business |
 | 5+ | HR/salarizare, producție, POS, integrări bancare | Doar după cerere confirmată de clienți reali, nu speculativ | add-on Enterprise |
 
+## Structura de date — sursă de adevăr: schema SAF-T
+
+Documentele oficiale ANAF pentru declarația SAF-T (D406) sunt în
+[`docs/saft/`](./saft/):
+
+- `Ro_SAFT_Schema_v249_2025.xsd` — schema XSD oficială (rădăcină `AuditFile`,
+  cu `Header`, `MasterFiles` — conturi, clienți, furnizori, produse — și
+  secțiunile de tranzacții).
+- `RO_SAFT_SchemaDefCod_16.02.2026.xlsx` — definiția câmp-cu-câmp + coduri.
+- `SAF_T_Ghidul_D406_1712021.pdf` — ghidul explicativ ANAF.
+
+**Regulă:** structura de date a fiecărui modul de business (facturare,
+stocuri, contabilitate) se proiectează având ca referință obligatorie
+această schemă — entitățile și câmpurile din `docs/data-model.md` trebuie
+mapabile direct pe elementele din `AuditFile`, ca generarea declarației
+SAF-T (modulul 3) să fie o serializare a datelor deja existente, nu o
+remodelare ulterioară. Nu inventa câmpuri paralele care nu au corespondent
+în schemă fără motiv documentat.
+
+Conform regulii de arhitectură #5 (CLAUDE.md), generarea efectivă a
+XML-ului SAF-T rămâne izolată în `src/integrations/anaf` — schema de mai
+sus e referință de proiectare a datelor, nu loc pentru logică de business.
+
 ## Reguli
 
 - Niciun modul nu se lansează fără preț propriu, chiar dacă e „beta”.
