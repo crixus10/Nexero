@@ -1,0 +1,26 @@
+name: nexero
+
+# Mediu de dezvoltare LOCALĂ. Producția rulează pe Hetzner Cloud, cu propriul
+# docker-compose (vezi docs/architecture.md) — fișierul ăsta nu e pentru
+# deploy, doar pentru a avea Postgres la îndemână în timpul dezvoltării.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexero}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexero}
+      POSTGRES_DB: ${POSTGRES_DB:-nexero}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexero} -d ${POSTGRES_DB:-nexero}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
