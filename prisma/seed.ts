@@ -1,6 +1,5 @@
 // Seed de dezvoltare — creează un tenant + un user de test pentru login,
-// plus un modul de test cu entitlement activ (pentru verificarea manuală
-// a lanțului JwtAuthGuard -> ModuleGuard -> @RequireModule).
+// plus catalogul modulului 1 (fără entitlement — vezi mai jos).
 // Idempotent (upsert): sigur de rulat de mai multe ori.
 // Rulare: `npx prisma db seed` (configurat în prisma7.config.ts).
 import 'dotenv/config';
@@ -11,7 +10,6 @@ import * as bcrypt from 'bcryptjs';
 const TEST_EMAIL = 'test@nexero.local';
 const TEST_PASSWORD = 'parola-test-123';
 const SALT_ROUNDS = 10;
-const TEST_MODULE_CODE = 'test';
 
 // Modulul 1 real, per docs/roadmap.md ("Facturare + e-Factura ANAF").
 // Doar catalogul (modules + plans) — NICIUN tenant_module, deliberat: nu
@@ -43,44 +41,6 @@ async function main(): Promise<void> {
     where: { email: TEST_EMAIL },
     update: { passwordHash, tenantId: tenant.id },
     create: { email: TEST_EMAIL, passwordHash, tenantId: tenant.id },
-  });
-
-  // Modul + plan „test" — NU un modul de business real (vezi
-  // src/entitlements/entitlements-test.controller.ts) — doar ca tenantul
-  // demo să aibă un entitlement activ de verificat manual.
-  await prisma.module.upsert({
-    where: { code: TEST_MODULE_CODE },
-    update: {},
-    create: {
-      code: TEST_MODULE_CODE,
-      name: 'Test (verificare guard)',
-      billingType: 'flat',
-    },
-  });
-  const plan = await prisma.plan.upsert({
-    where: { id: '00000000-0000-0000-0000-000000000001' },
-    update: {},
-    create: {
-      id: '00000000-0000-0000-0000-000000000001',
-      moduleCode: TEST_MODULE_CODE,
-      name: 'test-plan',
-      priceCents: 0,
-    },
-  });
-  await prisma.tenantModule.upsert({
-    where: {
-      tenantId_moduleCode: {
-        tenantId: tenant.id,
-        moduleCode: TEST_MODULE_CODE,
-      },
-    },
-    update: { status: 'active', planId: plan.id },
-    create: {
-      tenantId: tenant.id,
-      moduleCode: TEST_MODULE_CODE,
-      planId: plan.id,
-      status: 'active',
-    },
   });
 
   // Catalog modulul 1 (Facturare) — preț din docs/pricing.md, pachetul
@@ -120,9 +80,6 @@ async function main(): Promise<void> {
   console.log(`  email:    ${TEST_EMAIL}`);
   console.log(`  parolă:   ${TEST_PASSWORD}`);
   console.log(`  tenantId: ${tenant.id}`);
-  console.log(
-    `  modul "${TEST_MODULE_CODE}" activ — GET /entitlements-test/ping ar trebui să dea 200.`,
-  );
   console.log(
     `  modul "${INVOICING_MODULE_CODE}" + plan "start" înregistrate în catalog (fără entitlement activ, fără logică de facturare).`,
   );

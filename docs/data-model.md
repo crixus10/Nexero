@@ -172,13 +172,13 @@ business, nu stă în `src/modules/`).
   găsește metadata pe handler și lasă cererea să treacă necondiționat,
   fără verificare de plată, silențios. Folosește-l mereu pe fiecare
   metodă protejată individual, niciodată la nivel de clasă.
-- Endpoint temporar de verificare: `GET /entitlements-test/ping`
-  (`src/entitlements/entitlements-test.*`), protejat cu
-  `@RequireModule('test')` — NU e modul de business, doar dovadă că
-  lanțul JwtAuthGuard → ModuleGuard funcționează. De șters când modulul 1
-  (Facturare) are propriile rute reale cu `@RequireModule('invoicing')`.
-  `prisma/seed.ts` creează modulul `test` + un entitlement `active` pentru
-  tenantul demo, ca endpoint-ul să fie testabil manual din prima.
+- Exemplu real de `@RequireModule` în uz: `GET /invoices`
+  (`src/modules/invoicing/`) — schelet minim, fără logică de facturare,
+  vezi `docs/roadmap.md`. Endpoint-ul temporar de verificare
+  (`/entitlements-test/ping`) a fost șters odată ce a apărut această rută
+  reală — nu mai există un modul „test" separat în `prisma/seed.ts`.
+  Verificare lanțului complet (401 fără token → 403 fără entitlement → 200
+  cu entitlement activ): `test/invoicing.e2e-spec.ts`.
 
 ```typescript
 @Injectable()

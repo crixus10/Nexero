@@ -3,7 +3,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
-import { EntitlementsTestModule } from './entitlements/entitlements-test.module';
+import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -15,8 +15,8 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     AuthModule,
     EntitlementsModule,
-    EntitlementsTestModule,
     PaymentsModule,
+    InvoicingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
