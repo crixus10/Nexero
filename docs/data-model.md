@@ -149,6 +149,37 @@ business, nu stă în `src/modules/`).
 
 ## Tiparul de verificare acces (guard)
 
+**Implementare reală** (nu doar pseudocod): `src/entitlements/` — nucleu, ca
+`src/auth/`, `src/prisma/`, nu modul de business.
+- `EntitlementsService.getActive(tenantId, moduleCode)` — interpretare
+  "activ" fixată explicit (nescrisă literal mai sus): `status = 'active'`
+  SAU `status = 'trial'` cu `trial_ends_at` încă neexpirat (sau nesetat).
+  `past_due`/`canceled` NU dau acces.
+- `ModuleGuard` e **global** (`APP_GUARD` în `entitlements.module.ts`),
+  exact ca `JwtAuthGuard` — `@RequireModule('x')` funcționează singur pe
+  orice rută, fără `@UseGuards` explicit (tiparul de mai jos e literă,
+  nu doar exemplu). **Ordine obligatorie**: `AuthModule` importat înaintea
+  `EntitlementsModule` în `app.module.ts` — `ModuleGuard` citește
+  `req.user.tenantId`, atașat de `JwtAuthGuard`. Verificare defensivă
+  inclusă (`if (!request.user) throw UnauthorizedException`) — nu se
+  bazează orbește pe ordine, ca o reordonare accidentală să dea 401 clar,
+  nu un 500 nedeslușit.
+- **`@RequireModule` citește metadata DOAR de pe metodă
+  (`ctx.getHandler()`), NICIODATĂ de pe clasă** — spre deosebire de
+  `@Public()`/`@Protected()` din `src/auth/`, care verifică și clasa
+  (`getAllAndOverride([handler, class])`). Pus pe o clasă întreagă,
+  `@RequireModule` nu aruncă nicio eroare, dar nu face NIMIC — guard-ul nu
+  găsește metadata pe handler și lasă cererea să treacă necondiționat,
+  fără verificare de plată, silențios. Folosește-l mereu pe fiecare
+  metodă protejată individual, niciodată la nivel de clasă.
+- Endpoint temporar de verificare: `GET /entitlements-test/ping`
+  (`src/entitlements/entitlements-test.*`), protejat cu
+  `@RequireModule('test')` — NU e modul de business, doar dovadă că
+  lanțul JwtAuthGuard → ModuleGuard funcționează. De șters când modulul 1
+  (Facturare) are propriile rute reale cu `@RequireModule('invoicing')`.
+  `prisma/seed.ts` creează modulul `test` + un entitlement `active` pentru
+  tenantul demo, ca endpoint-ul să fie testabil manual din prima.
+
 ```typescript
 @Injectable()
 export class ModuleGuard implements CanActivate {
