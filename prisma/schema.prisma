@@ -1,8 +1,9 @@
 // Schema Prisma — sursa executabilă a schemei descrise în docs/data-model.md.
 // Orice tabel nou de business (facturare, stocuri etc.) NU se adaugă aici
 // direct — fiecare modul își definește propriile tabele, separate, care
-// referă doar tenantId. Acest fișier conține strict nucleul (auth +
-// entitlements), construit o singură dată, la modulul 1, per docs/roadmap.md.
+// referă doar tenantId. Acest fișier conține strict nucleul (auth,
+// entitlements, billing), construit o singură dată, la modulul 1, per
+// docs/roadmap.md.
 
 generator client {
   provider = "prisma-client-js"
@@ -92,10 +93,29 @@ model TenantModule {
   trialEndsAt          DateTime? @map("trial_ends_at") @db.Timestamptz(6)
   currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz(6)
   stripeSubscriptionId String?   @map("stripe_subscription_id")
+  // Timestamp-ul evenimentului Stripe (event.created) care a scris ultima
+  // dată acest rând — Stripe NU garantează livrare ordonată a webhook-
+  // urilor; fără asta, un event.payment_failed întârziat ar putea
+  // suprascrie o activare mai recentă (sau invers). Vezi
+  // src/payments/stripe-webhook.service.ts.
+  lastEventAt          DateTime? @map("last_event_at") @db.Timestamptz(6)
 
   @@unique([tenantId, moduleCode])
+  @@unique([stripeSubscriptionId])
   @@index([planId])
   @@map("tenant_modules")
+}
+
+/// Idempotență pentru webhook-uri de plată (Stripe/Netopia) — un event.id
+/// retrimis de furnizor (retry) nu trebuie să activeze entitlement-ul de
+/// mai multe ori. Vezi src/payments/ și docs/data-model.md.
+model ProcessedWebhookEvent {
+  id          String   @id // event.id de la furnizor (ex: Stripe "evt_...")
+  provider    String // 'stripe' | 'netopia'
+  eventType   String   @map("event_type")
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@map("processed_webhook_events")
 }
 
 /// Evenimente de consum, pentru module taxate pe volum.

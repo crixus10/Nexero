@@ -5,7 +5,12 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Necesar pentru StripeWebhookController — semnătura Stripe se
+    // verifică pe bytes-ii bruți ai body-ului, nu pe JSON-ul parsat.
+    // Fără asta, req.rawBody nu există și verificarea eșuează mereu.
+    rawBody: true,
+  });
   // Fără asta, SIGTERM (ex: `docker compose down`/restart în producție pe
   // Hetzner) omite onModuleDestroy — PrismaService nu ar mai închide
   // conexiunile din pool-ul pg la oprire.

@@ -33,6 +33,7 @@ const entitlement: TenantModule = {
   trialEndsAt: null,
   currentPeriodEnd: null,
   stripeSubscriptionId: null,
+  lastEventAt: null,
 };
 
 describe('ModuleGuard', () => {

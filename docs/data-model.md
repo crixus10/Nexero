@@ -252,6 +252,70 @@ Webhook-ul trebuie tratat idempotent (Stripe poate retrimite același
 eveniment) — verifică `event.id` deja procesat înainte de upsert, altfel
 riști facturare/activare dublă.
 
+**Implementare reală**: `src/payments/` — nucleu ("billing" din
+`docs/roadmap.md`), la fel ca `src/auth/`, `src/prisma/`,
+`src/entitlements/`.
+
+- `POST /webhooks/stripe` (`StripeWebhookController`) — `@Public()`
+  obligatoriu (Stripe nu trimite JWT-ul nostru; autenticitatea vine din
+  `stripe.webhooks.constructEvent`, care verifică semnătura criptografică
+  din header-ul `Stripe-Signature` contra `STRIPE_WEBHOOK_SECRET`).
+  Throttling propriu (30/min, mai permisiv decât cele 5/min de pe
+  `/auth/login` — Stripe poate trimite rafale).
+- **Body brut obligatoriu**: `NestFactory.create(AppModule, { rawBody: true })`
+  în `main.ts` — semnătura Stripe se calculează pe bytes-ii bruți ai
+  request-ului, nu pe JSON-ul reparsat. Fără asta, verificarea eșuează
+  mereu (fals-negativ pe payload-uri legitime).
+- **Idempotență reală, nu doar „verifică înainte de upsert”**: tabelă nouă
+  `processed_webhook_events` (id = `event.id`, PRIMARY KEY). Inserarea în
+  ea și efectul de business (upsert pe `tenant_modules`) se fac în
+  **aceeași tranzacție** (`prisma.$transaction`) — un conflict `UNIQUE`
+  pe `event.id` (Prisma error `P2002`) înseamnă "deja procesat", ignorat
+  silențios (răspuns tot `200`, ca Stripe să nu reîncerce la infinit).
+  Tranzacția (nu un `findUnique` separat înainte) contează sub concurență
+  reală — două livrări simultane ale aceluiași `event.id` nu au o
+  fereastră TOCTOU în care ambele să treacă de verificare.
+- **Metadata incompletă pe `checkout.session.completed` → ARUNCĂ, nu
+  loghează și ignoră.** Un client debitat real de Stripe, dar cu
+  `tenantId`/`moduleCode`/`planId` lipsă din `metadata`, nu trebuie marcat
+  silențios "procesat" fără activare — asta ar însemna bani luați, acces
+  neacordat, și nimeni nu observă. Aruncarea face tranzacția rollback
+  (evenimentul NU rămâne în `processed_webhook_events`) — Stripe primește
+  5xx, reîncearcă și marchează eșecul vizibil în dashboard-ul lor.
+- **Gardă de ordonare** (`tenant_modules.last_event_at`): Stripe NU
+  garantează livrare ordonată a webhook-urilor. Orice scriere pe
+  `tenant_modules` din acest serviciu e condiționată de
+  `last_event_at IS NULL OR last_event_at <= event.created` — un eveniment
+  mai vechi, sosit după unul mai nou, e ignorat (nu suprascrie starea).
+  `<=`, nu `<` — `event.created` are granularitate de 1 secundă, iar două
+  evenimente distincte pot cădea în aceeași secundă (descoperit chiar
+  printr-un test e2e propriu, nu doar teoretic).
+  **Risc cunoscut, acceptat deliberat la acest stadiu** (volum mic, fără
+  clienți reali încă): `<=` reduce fereastra de race la "aceeași secundă",
+  nu o elimină — două evenimente DISTINCTE cu `event.created` identic
+  (plauzibil exact în cazuri înlănțuite rapid: retry de plată urmat
+  aproape instant de un nou checkout) sunt departajate doar de ordinea în
+  care ajung la server, nu de ordinea cronologică reală Stripe (care are
+  precizie sub-secundă, nefolosită aici). Dacă volumul de evenimente
+  crește, de reconsiderat un tiebreak determinist (ex: la egalitate pe
+  `last_event_at`, o stare "mai defensivă" ca `past_due`/`canceled` să nu
+  poată fi suprascrisă de `active` din aceeași secundă) — nu implementat
+  acum, ar fi speculativ fără date reale de volum/coliziuni.
+- `tenant_modules.stripe_subscription_id` are `@@unique` (nu doar index) —
+  `invoice.payment_failed` face `updateMany` pe acea coloană; fără
+  unicitate, o eventuală coliziune ar propaga `past_due` pe mai multe
+  rânduri deodată, posibil alt tenant.
+- `StripeWebhookService` — **deliberat NEexportat** din
+  `PaymentsModule` — niciun alt modul nu-l poate injecta și "activa" un
+  entitlement direct. Aplică regula #4 din CLAUDE.md structural, nu doar
+  ca o convenție de urmat.
+- Env: `STRIPE_SECRET_KEY` (mod test, `sk_test_...`),
+  `STRIPE_WEBHOOK_SECRET` (`whsec_...`, din `stripe listen` sau dashboard).
+  Vezi `.env.example`.
+- Netopia: NU implementat încă — același tipar (webhook izolat, idempotent
+  prin `processed_webhook_events`, `provider: 'netopia'`) se aplică atunci
+  când apare cerința reală, per `docs/roadmap.md`.
+
 ## Fluxul complet
 
 1. Client alege modul + plan (UI) → 2. Checkout Stripe/Netopia → 3. Webhook

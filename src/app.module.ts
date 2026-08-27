@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
 import { EntitlementsTestModule } from './entitlements/entitlements-test.module';
+import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -15,6 +16,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     EntitlementsModule,
     EntitlementsTestModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

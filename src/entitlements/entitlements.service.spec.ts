@@ -16,6 +16,7 @@ describe('EntitlementsService', () => {
     trialEndsAt: null,
     currentPeriodEnd: null,
     stripeSubscriptionId: null,
+    lastEventAt: null,
   };
 
   beforeEach(async () => {
