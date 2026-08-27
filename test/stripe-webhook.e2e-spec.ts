@@ -11,7 +11,10 @@ import { AppModule } from '../src/app.module';
 // — helper-ul oficial Stripe pentru teste), inclusiv idempotența cerută
 // explicit: același event.id trimis de 2 ori nu activează de 2 ori.
 const TENANT_CUI = 'RO-E2E-STRIPE-WEBHOOK';
-const MODULE_CODE = 'invoicing';
+// Cod de test dedicat, NU 'invoicing' — acela e acum modulul real din
+// catalog (prisma/seed.ts), cu propriul plan permanent; cleanup-ul de mai
+// jos (deleteMany pe modules) ar da FK violation dacă am refolosi codul.
+const MODULE_CODE = 'e2e-stripe-webhook-test';
 const PLAN_ID = '00000000-0000-0000-0000-000000000099';
 
 describe('Stripe webhook (e2e)', () => {
@@ -39,7 +42,11 @@ describe('Stripe webhook (e2e)', () => {
     await prisma.module.upsert({
       where: { code: MODULE_CODE },
       update: {},
-      create: { code: MODULE_CODE, name: 'Facturare', billingType: 'flat' },
+      create: {
+        code: MODULE_CODE,
+        name: 'E2E Stripe Webhook Test Module',
+        billingType: 'flat',
+      },
     });
     await prisma.plan.upsert({
       where: { id: PLAN_ID },
