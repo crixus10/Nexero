@@ -1,0 +1,60 @@
+name: nexero-prod
+
+# Compose de PRODUCȚIE — vezi docs/deploy.md pentru runbook-ul complet.
+# Diferă deliberat de docker-compose.yml (dev): aici Postgres NU expune
+# portul către host (doar rețeaua internă Docker), există un container
+# `app` (construit din Dockerfile) și un reverse proxy (`caddy`) cu TLS
+# automat. Variabilele vin dintr-un fișier `.env` lângă acest fișier —
+# copiază-l din .env.production.example (vezi docs/deploy.md, pasul 6).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Deliberat FĂRĂ `ports:` — nicio expunere către host/internet, doar
+    # rețeaua internă docker-compose, accesibilă altor servicii de aici.
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Compusă din variabilele de mai sus — Postgres e adresat prin
+      # numele serviciului ("postgres"), nu "localhost" (cum e în dev).
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    # Nici aici `ports:` — accesul vine exclusiv prin caddy (reverse proxy).
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

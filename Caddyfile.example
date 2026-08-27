@@ -1,0 +1,8 @@
+# Copiază ca "Caddyfile" (fără extensie) lângă docker-compose.prod.yml pe
+# server și înlocuiește domeniul — vezi docs/deploy.md, pasul 7.
+# Caddy obține automat certificatul TLS (Let's Encrypt) la prima pornire;
+# are nevoie de DNS deja propagat către IP-ul serverului.
+
+api.exemplul-tau.ro {
+	reverse_proxy app:3000
+}

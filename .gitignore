@@ -4,9 +4,15 @@ node_modules/
 # build output
 dist/
 
-# env
+# env — orice fișier .env real (cu secrete); păstrăm urmărite doar
+# șabloanele *.example din repo.
 .env
 .env.local
+.env.production
+.env.*.local
+
+# Caddyfile real (cu domeniul de producție) — păstrăm doar Caddyfile.example
+Caddyfile
 
 # logs
 *.log

@@ -1,0 +1,5 @@
+# Scripturile shell trebuie să aibă LF, indiferent de OS-ul/setarea
+# core.autocrlf a celui care face checkout — CRLF le rupe în containere
+# Linux (shebang #!/bin/sh nu se recunoaște cu \r la final). Vezi
+# Dockerfile / docker-entrypoint.sh (docs/deploy.md).
+*.sh text eol=lf
