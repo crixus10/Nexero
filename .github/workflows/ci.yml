@@ -1,0 +1,31 @@
+name: CI
+
+# Rulează la fiecare push (orice branch) și la fiecare pull request —
+# doar lint + build, fără teste (acelea au nevoie de Postgres live prin
+# docker-compose.yml, care nu rulează aici — de adăugat separat, ca job
+# distinct cu un service container, dacă/când se decide explicit).
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: 'npm'
+
+      - name: Instalează dependențele
+        run: npm ci
+
+      - name: Lint (fără --fix — eșuează pe erori, nu le repară silențios)
+        run: npm run lint:ci
+
+      - name: Build
+        run: npm run build
