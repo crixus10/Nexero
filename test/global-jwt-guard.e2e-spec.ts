@@ -15,7 +15,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { Protected, Public } from '../src/auth/public.decorator';
-import type { RequestWithUser } from '../src/auth/jwt-auth.guard';
+import type { RequestWithUser } from '../src/auth/jwt-payload.interface';
 
 // Controller „fals", ca un viitor modul de business — dovedește că
 // JwtAuthGuard protejează ORICE rută nouă fără niciun @UseGuards explicit,

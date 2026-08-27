@@ -127,6 +127,50 @@ describe('Stripe webhook (e2e)', () => {
     return { payload, header };
   }
 
+  function sign(payload: string): string {
+    return new Stripe('sk_test_placeholder').webhooks.generateTestHeaderString({
+      payload,
+      secret: webhookSecret,
+    });
+  }
+
+  function invoiceEventPayload(
+    type: 'invoice.payment_failed' | 'invoice.payment_succeeded',
+    eventId: string,
+    subscriptionId: string,
+    created?: number,
+  ): { payload: string; header: string } {
+    const payload = JSON.stringify({
+      id: eventId,
+      object: 'event',
+      type,
+      created: created ?? Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: 'in_e2e_test',
+          object: 'invoice',
+          parent: { subscription_details: { subscription: subscriptionId } },
+        },
+      },
+    });
+    return { payload, header: sign(payload) };
+  }
+
+  function subscriptionDeletedPayload(
+    eventId: string,
+    subscriptionId: string,
+    created?: number,
+  ): { payload: string; header: string } {
+    const payload = JSON.stringify({
+      id: eventId,
+      object: 'event',
+      type: 'customer.subscription.deleted',
+      created: created ?? Math.floor(Date.now() / 1000),
+      data: { object: { id: subscriptionId, object: 'subscription' } },
+    });
+    return { payload, header: sign(payload) };
+  }
+
   it('fără semnătură → 400 (nu procesează nimic)', async () => {
     await request(app.getHttpServer())
       .post('/webhooks/stripe')
@@ -249,5 +293,86 @@ describe('Stripe webhook (e2e)', () => {
     // Dacă garda de ordonare n-ar exista, "ultima scriere câștigă" ar pune
     // sub_older_should_be_ignored, deși evenimentul lui e cronologic mai vechi.
     expect(entitlement?.stripeSubscriptionId).toBe('sub_newer');
+  });
+
+  it('CICLU COMPLET: activare -> plată eșuată (past_due) -> plată reușită -> revine pe active', async () => {
+    const subscriptionId = 'sub_lifecycle_test';
+    const activate = signedPayload(
+      'evt_e2e_test_lifecycle_activate',
+      subscriptionId,
+    );
+    await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .set('Stripe-Signature', activate.header)
+      .send(activate.payload)
+      .expect(200);
+
+    const failed = invoiceEventPayload(
+      'invoice.payment_failed',
+      'evt_e2e_test_lifecycle_failed',
+      subscriptionId,
+    );
+    await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .set('Stripe-Signature', failed.header)
+      .send(failed.payload)
+      .expect(200);
+
+    let entitlement = await prisma.tenantModule.findUnique({
+      where: { tenantId_moduleCode: { tenantId, moduleCode: MODULE_CODE } },
+    });
+    expect(entitlement?.status).toBe('past_due');
+
+    // Găsit de logic-reviewer la un audit holistic: fără acest eveniment,
+    // un client care plătește efectiv rămâne blocat până la intervenție
+    // manuală în DB.
+    const succeeded = invoiceEventPayload(
+      'invoice.payment_succeeded',
+      'evt_e2e_test_lifecycle_succeeded',
+      subscriptionId,
+    );
+    await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .set('Stripe-Signature', succeeded.header)
+      .send(succeeded.payload)
+      .expect(200);
+
+    entitlement = await prisma.tenantModule.findUnique({
+      where: { tenantId_moduleCode: { tenantId, moduleCode: MODULE_CODE } },
+    });
+    expect(entitlement?.status).toBe('active');
+  });
+
+  it('customer.subscription.deleted → trece entitlement-ul pe canceled', async () => {
+    const subscriptionId = 'sub_cancel_test';
+    const activate = signedPayload(
+      'evt_e2e_test_cancel_activate',
+      subscriptionId,
+    );
+    await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .set('Stripe-Signature', activate.header)
+      .send(activate.payload)
+      .expect(200);
+
+    const deleted = subscriptionDeletedPayload(
+      'evt_e2e_test_cancel_deleted',
+      subscriptionId,
+    );
+    await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .set('Stripe-Signature', deleted.header)
+      .send(deleted.payload)
+      .expect(200);
+
+    const entitlement = await prisma.tenantModule.findUnique({
+      where: { tenantId_moduleCode: { tenantId, moduleCode: MODULE_CODE } },
+    });
+    expect(entitlement?.status).toBe('canceled');
   });
 });

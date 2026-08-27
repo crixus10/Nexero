@@ -7,10 +7,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
-import { AuthenticatedUser, JwtPayload } from './jwt-payload.interface';
+import { JwtPayload, RequestWithUser } from './jwt-payload.interface';
 import { IS_PUBLIC_KEY } from './public.decorator';
-
-export type RequestWithUser = Request & { user: AuthenticatedUser };
 
 /**
  * Guard minim, fără Passport (inutil pentru un singur flux JWT simplu).

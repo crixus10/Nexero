@@ -6,11 +6,14 @@ pentru tot ce ține de „ce modul are activ o firmă”.
 
 **Implementare executabilă:** `prisma/schema.prisma` (ORM: Prisma, ales în
 locul TypeORM — migrări explicite versionate + client 100% tipat, vezi
-justificarea în istoricul sesiunii). Migrări:
-`prisma/migrations/20260826164140_init_entitlements/` (schema inițială),
-`prisma/migrations/20260826165855_add_fk_indexes/` (indici lipsă pe FK-uri)
-și `prisma/migrations/20260826171424_add_users/` (tabela `users`, pentru
-autentificare).
+justificarea în istoricul sesiunii). Migrări (în ordine):
+`20260826164140_init_entitlements` (schema inițială),
+`20260826165855_add_fk_indexes` (indici lipsă pe FK-uri),
+`20260826171424_add_users` (tabela `users`, pentru autentificare),
+`20260827083021_add_processed_webhook_events` (idempotență webhook-uri —
+vezi secțiunea „Tiparul de activare” mai jos) și
+`20260827084922_add_last_event_at_and_subscription_unique` (gardă de
+ordonare pe evenimente Stripe + `@@unique` pe `stripe_subscription_id`).
 SQL-ul de mai jos descrie conceptul; schema reală, cu `CHECK`-uri incluse,
 e în acele fișiere — nu le regenera de la zero, extinde-le cu
 `prisma migrate dev`.
@@ -305,6 +308,18 @@ riști facturare/activare dublă.
   `invoice.payment_failed` face `updateMany` pe acea coloană; fără
   unicitate, o eventuală coliziune ar propaga `past_due` pe mai multe
   rânduri deodată, posibil alt tenant.
+- **Evenimente gestionate** (găsit incomplet la un audit holistic —
+  `past_due` nu avea nicio cale de revenire): `checkout.session.completed`
+  → `active` (+ scrie `planId`/`stripeSubscriptionId`, singurul eveniment
+  cu metadata pentru o primă activare); `invoice.payment_failed` →
+  `past_due`; `invoice.payment_succeeded` → **`active`** (recuperare —
+  fără el, un client care își actualizează cardul și plătește efectiv
+  rămâne blocat din modul până la intervenție manuală în DB);
+  `customer.subscription.deleted` → **`canceled`** (anulare explicită,
+  parte din fluxul documentat mai sus, dar nescrisă de niciun cod până la
+  acest audit). Ultimele trei folosesc același tipar (`updateStatusBySubscription`
+  în `stripe-webhook.service.ts`): `updateMany` pe `stripeSubscriptionId`,
+  cu aceeași gardă de ordonare pe `last_event_at`.
 - `StripeWebhookService` — **deliberat NEexportat** din
   `PaymentsModule` — niciun alt modul nu-l poate injecta și "activa" un
   entitlement direct. Aplică regula #4 din CLAUDE.md structural, nu doar

@@ -66,7 +66,20 @@ export class StripeWebhookService {
         await this.handleCheckoutSessionCompleted(tx, event);
         break;
       case 'invoice.payment_failed':
-        await this.handleInvoicePaymentFailed(tx, event);
+        await this.handleInvoiceStatusEvent(tx, event, 'past_due');
+        break;
+      case 'invoice.payment_succeeded':
+        // Recuperare din past_due (ex: client își actualizează cardul,
+        // Stripe reîncearcă automat cu succes) — fără acest handler,
+        // singura cale de revenire la 'active' ar fi intervenție manuală
+        // în DB, deși clientul a plătit efectiv. Găsit de logic-reviewer
+        // la un audit holistic, nu era literă în docs/data-model.md.
+        await this.handleInvoiceStatusEvent(tx, event, 'active');
+        break;
+      case 'customer.subscription.deleted':
+        // Anulare explicită — 'canceled' e parte din fluxul deja documentat
+        // în docs/data-model.md, dar nimic nu-l scria până acum.
+        await this.handleSubscriptionDeleted(tx, event);
         break;
       default:
         this.logger.debug(
@@ -103,23 +116,13 @@ export class StripeWebhookService {
       typeof session.subscription === 'string'
         ? session.subscription
         : session.subscription?.id;
-    // Stripe NU garantează livrare ordonată a webhook-urilor — un event
-    // vechi (retry întârziat, coadă distribuită) nu trebuie să
-    // suprascrie o stare mai nouă (ex: un invoice.payment_failed
-    // procesat între timp). Scriem doar dacă evenimentul curent e mai
-    // nou decât ultimul aplicat pe acest rând.
-    const eventCreatedAt = new Date(event.created * 1000);
+    const eventCreatedAt = this.eventCreatedAt(event);
 
     const updated = await tx.tenantModule.updateMany({
       where: {
         tenantId,
         moduleCode,
-        // <=, nu < : granularitatea event.created e 1 secundă — două
-        // evenimente DISTINCTE pot avea exact același timestamp Stripe.
-        // Cu comparație strictă, al doilea ar fi respins silențios ca
-        // "stale" deși e legitim (descoperit chiar prin testul e2e de
-        // idempotență, care reutilizează același tenant+modul).
-        OR: [{ lastEventAt: null }, { lastEventAt: { lte: eventCreatedAt } }],
+        ...this.notStaleFilter(eventCreatedAt),
       },
       data: {
         status: 'active',
@@ -157,9 +160,18 @@ export class StripeWebhookService {
     }
   }
 
-  private async handleInvoicePaymentFailed(
+  /**
+   * Tipar comun pentru evenimentele de facturare care doar schimbă statusul
+   * unui entitlement deja existent, identificat prin stripeSubscriptionId
+   * (invoice.payment_failed -> past_due, invoice.payment_succeeded ->
+   * active) — nu creează rânduri noi, spre deosebire de
+   * checkout.session.completed, singurul eveniment cu metadata
+   * tenant/modul/plan necesară pentru o primă activare.
+   */
+  private async handleInvoiceStatusEvent(
     tx: Prisma.TransactionClient,
     event: Stripe.Event,
+    status: 'active' | 'past_due',
   ): Promise<void> {
     const invoice = event.data.object as Stripe.Invoice;
     // API Stripe recentă: nu mai există invoice.subscription direct —
@@ -169,29 +181,63 @@ export class StripeWebhookService {
       typeof subscription === 'string' ? subscription : subscription?.id;
     if (!subscriptionId) {
       this.logger.warn(
-        `invoice.payment_failed ${invoice.id} (event ${event.id}) fără subscription — ignorat.`,
+        `${event.type} ${invoice.id} (event ${event.id}) fără subscription — ignorat.`,
       );
       return;
     }
+    await this.updateStatusBySubscription(tx, event, subscriptionId, status);
+  }
 
-    const eventCreatedAt = new Date(event.created * 1000);
+  private async handleSubscriptionDeleted(
+    tx: Prisma.TransactionClient,
+    event: Stripe.Event,
+  ): Promise<void> {
+    const subscription = event.data.object as Stripe.Subscription;
+    await this.updateStatusBySubscription(
+      tx,
+      event,
+      subscription.id,
+      'canceled',
+    );
+  }
+
+  private async updateStatusBySubscription(
+    tx: Prisma.TransactionClient,
+    event: Stripe.Event,
+    subscriptionId: string,
+    status: 'active' | 'past_due' | 'canceled',
+  ): Promise<void> {
+    const eventCreatedAt = this.eventCreatedAt(event);
     const updated = await tx.tenantModule.updateMany({
       where: {
         stripeSubscriptionId: subscriptionId,
-        // <=, nu < : granularitatea event.created e 1 secundă — două
-        // evenimente DISTINCTE pot avea exact același timestamp Stripe.
-        // Cu comparație strictă, al doilea ar fi respins silențios ca
-        // "stale" deși e legitim (descoperit chiar prin testul e2e de
-        // idempotență, care reutilizează același tenant+modul).
-        OR: [{ lastEventAt: null }, { lastEventAt: { lte: eventCreatedAt } }],
+        ...this.notStaleFilter(eventCreatedAt),
       },
-      data: { status: 'past_due', lastEventAt: eventCreatedAt },
+      data: { status, lastEventAt: eventCreatedAt },
     });
     if (updated.count === 0) {
       this.logger.warn(
-        `invoice.payment_failed ${event.id} (subscription ${subscriptionId}) — niciun rând actualizat ` +
+        `${event.type} ${event.id} (subscription ${subscriptionId}) — niciun rând actualizat ` +
           '(subscription necunoscut încă, sau eveniment mai vechi decât ultima stare aplicată).',
       );
     }
+  }
+
+  private eventCreatedAt(event: Stripe.Event): Date {
+    return new Date(event.created * 1000);
+  }
+
+  /**
+   * Stripe NU garantează livrare ordonată a webhook-urilor — un eveniment
+   * vechi nu trebuie să suprascrie o stare mai nouă. `<=`, nu `<`:
+   * granularitatea event.created e 1 secundă — două evenimente DISTINCTE
+   * pot avea exact același timestamp (descoperit printr-un test e2e
+   * propriu, nu doar teoretic). Vezi docs/data-model.md pentru riscul
+   * rezidual acceptat pe evenimente cu timestamp identic.
+   */
+  private notStaleFilter(eventCreatedAt: Date): Prisma.TenantModuleWhereInput {
+    return {
+      OR: [{ lastEventAt: null }, { lastEventAt: { lte: eventCreatedAt } }],
+    };
   }
 }

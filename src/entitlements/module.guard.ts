@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { TenantModule } from '@prisma/client';
 import type { Request } from 'express';
-import type { RequestWithUser } from '../auth/jwt-auth.guard';
+import type { RequestWithUser } from '../auth/jwt-payload.interface';
 import { EntitlementsService } from './entitlements.service';
 import { MODULE_KEY } from './require-module.decorator';
 

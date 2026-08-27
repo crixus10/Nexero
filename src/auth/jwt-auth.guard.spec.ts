@@ -1,7 +1,8 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { JwtAuthGuard, RequestWithUser } from './jwt-auth.guard';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import type { RequestWithUser } from './jwt-payload.interface';
 
 function makeContext(authorization?: string): {
   context: ExecutionContext;

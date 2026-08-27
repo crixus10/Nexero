@@ -1,6 +1,5 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { AuthenticatedUser } from './jwt-payload.interface';
-import { RequestWithUser } from './jwt-auth.guard';
+import { AuthenticatedUser, RequestWithUser } from './jwt-payload.interface';
 
 /**
  * @CurrentUser() într-un handler protejat de JwtAuthGuard — evită accesul

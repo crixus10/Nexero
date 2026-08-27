@@ -205,6 +205,56 @@ describe('StripeWebhookService', () => {
     expect(tx.tenantModule.updateMany).not.toHaveBeenCalled();
   });
 
+  it('invoice.payment_succeeded → readuce entitlement-ul pe active (recuperare din past_due)', async () => {
+    tx.tenantModule.updateMany.mockResolvedValueOnce({ count: 1 });
+    const event = makeEvent('invoice.payment_succeeded', {
+      id: 'in_2',
+      parent: { subscription_details: { subscription: 'sub_1' } },
+    });
+
+    await service.handleEvent(event);
+
+    expect(tx.tenantModule.updateMany).toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: 'sub_1',
+        OR: [
+          { lastEventAt: null },
+          { lastEventAt: { lte: new Date(event.created * 1000) } },
+        ],
+      },
+      data: { status: 'active', lastEventAt: new Date(event.created * 1000) },
+    });
+  });
+
+  it('invoice.payment_succeeded FĂRĂ subscription → marchează procesat, dar nu modifică nimic', async () => {
+    const event = makeEvent('invoice.payment_succeeded', {
+      id: 'in_2',
+      parent: null,
+    });
+
+    await service.handleEvent(event);
+
+    expect(tx.tenantModule.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('customer.subscription.deleted → trece entitlement-ul pe canceled', async () => {
+    tx.tenantModule.updateMany.mockResolvedValueOnce({ count: 1 });
+    const event = makeEvent('customer.subscription.deleted', { id: 'sub_1' });
+
+    await service.handleEvent(event);
+
+    expect(tx.tenantModule.updateMany).toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: 'sub_1',
+        OR: [
+          { lastEventAt: null },
+          { lastEventAt: { lte: new Date(event.created * 1000) } },
+        ],
+      },
+      data: { status: 'canceled', lastEventAt: new Date(event.created * 1000) },
+    });
+  });
+
   it('event type necunoscut → marchează procesat, fără efect de business', async () => {
     const event = makeEvent('customer.created', { id: 'cus_1' });
 
