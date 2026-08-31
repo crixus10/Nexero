@@ -34,6 +34,45 @@ Prețurile sunt punct de plecare, nu finale — validează cu structura de
 costuri și marja țintă înainte de a le fixa în cod (ex. în `plans` din
 `docs/data-model.md`).
 
+## Add-on AI (OCR facturi/bonuri) — pe uz, nu în abonamentul plat
+
+Singura excepție de la cele două axe de mai sus, și e intenționată: cost
+marginal real per apel, spre deosebire de restul produsului. Structură
+orientativă (validează cu costul real per apel către model înainte de a
+fixa cifrele):
+
+| | Start | Business | Enterprise |
+|---|---|---|---|
+| Scanări incluse/lună | 20 (teaser de upgrade) | 200 | negociat pe volum |
+| Preț peste plafon | per scanare, cost + marjă | per scanare, cost + marjă | negociat |
+
+**Demo public (cârlig, fără cont)**: 3 scanări gratuite/zi per IP sau
+sesiune, fără plan, fără facturare — cost acoperit din bugetul de achiziție
+clienți, nu din structura de pricing de mai sus. Obligatoriu limitat (vezi
+`docs/architecture.md`, secțiunea „Add-on AI") — fără plafon, devine gaură
+de cost deschisă public, nu cârlig de marketing.
+
+Asta nu contrazice regula de mai jos („nicio a treia axă de facturare") —
+acolo e vorba de structura de bază a planurilor (firme × utilizatori);
+metering-ul pe uz se aplică punctual, doar la funcționalități cu cost
+marginal real.
+
+## Portal Clienți — gratuit pentru destinatar, inclus pentru tenant
+
+Nu se taxează separat, pe niciuna din cele două părți implicate:
+
+- **Portal user (destinatarul facturii)** — mereu gratuit, fără excepție.
+  Taxarea accesului la propriile facturi ar contrazice motivul pentru care
+  există portalul (motor de creștere a bazei de utilizatori — vezi
+  `docs/customer-portal-spec.md`).
+- **Tenant (emitentul)** — funcționalitatea de bază (vizualizare facturi +
+  status plată de către clienții lui) inclusă gratuit din pachetul Start,
+  ca diferențiator față de Saga/WinMentor, nu ca add-on separat.
+- **Viitor, la cerere confirmată, nu acum**: funcționalități avansate
+  (plată online din portal, branding propriu al tenant-ului, remindere
+  automate) ca add-on plătit de la Business în sus — pe tenant, niciodată
+  pe portal user.
+
 ## Reguli de packaging
 
 - Fiecare modul nou lansat capătă preț propriu din prima zi (vezi

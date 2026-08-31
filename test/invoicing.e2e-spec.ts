@@ -89,6 +89,29 @@ describe('Invoicing module — access control (e2e)', () => {
         status: 'active',
       },
     });
+    // ModuleRoleGuard (RBAC per-modul, vezi src/rbac/) — entitlement-ul
+    // singur nu mai e suficient, userul are nevoie și de un rol de modul
+    // (măcar 'invoicing:viewer') ca GET /invoices să treacă.
+    const entitledUser = await prisma.user.findUniqueOrThrow({
+      where: { email: ENTITLED_EMAIL },
+    });
+    await prisma.userModuleRole.upsert({
+      where: {
+        tenantId_userId_moduleCode_role: {
+          tenantId: entitledTenant.id,
+          userId: entitledUser.id,
+          moduleCode: 'invoicing',
+          role: 'invoicing:viewer',
+        },
+      },
+      update: {},
+      create: {
+        tenantId: entitledTenant.id,
+        userId: entitledUser.id,
+        moduleCode: 'invoicing',
+        role: 'invoicing:viewer',
+      },
+    });
 
     // Tenant FĂRĂ niciun entitlement pe "invoicing" — user autentificat
     // valid, dar firma n-a cumpărat modulul.
@@ -148,6 +171,12 @@ describe('Invoicing module — access control (e2e)', () => {
       return;
     }
     // NU ștergem modulul 'invoicing' — e permanent (prisma/seed.ts).
+    // user_module_roles.user_id e ON DELETE RESTRICT — trebuie șters
+    // înaintea userilor, altfel prisma.user.deleteMany de mai jos eșuează
+    // pe încălcare de FK.
+    await prisma.userModuleRole.deleteMany({
+      where: { tenant: { cui: { in: [ENTITLED_CUI, NOT_ENTITLED_CUI] } } },
+    });
     await prisma.user.deleteMany({
       where: { email: { in: [ENTITLED_EMAIL, NOT_ENTITLED_EMAIL] } },
     });

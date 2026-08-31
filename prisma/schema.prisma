@@ -24,9 +24,14 @@ model Tenant {
   cui       String?  @unique
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  tenantModules TenantModule[]
-  usageEvents   UsageEvent[]
-  users         User[]
+  tenantModules   TenantModule[]
+  usageEvents     UsageEvent[]
+  users           User[]
+  userModuleRoles UserModuleRole[]
+  customers       Customer[]
+  products        Product[]
+  invoiceSeries   InvoiceSeries[]
+  invoices        Invoice[]
 
   @@map("tenants")
 }
@@ -41,10 +46,43 @@ model User {
   tenant       Tenant   @relation(fields: [tenantId], references: [id])
   email        String   @unique
   passwordHash String   @map("password_hash")
+  // Rol GLOBAL (companie) — NU rolul per-modul (user_module_roles, mai jos).
+  // Vezi docs/data-model.md, secțiunea „RBAC — users.role (global) + user_module_roles (per-modul)".
+  fullName     String   @default("") @map("full_name")
+  role         String   @default("operator") // CHECK: owner|admin|accountant|operator
+  isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  moduleRoles UserModuleRole[]
 
   @@index([tenantId])
   @@map("users")
+}
+
+/// Roluri per-modul (`invoicing:viewer/issuer/approver/admin` etc.) —
+/// granularitate pe care `users.role` (global) nu o poate exprima. Fiecare
+/// modul își definește propriile valori valide de rol în propriul fișier
+/// de specificație (ex. docs/invoicing-spec.md), nu aici — acest tabel e
+/// doar mecanismul comun de stocare, reutilizabil de orice modul viitor.
+/// Un user poate avea mai multe rânduri pe același modul (ex. viewer +
+/// issuer); segregarea issuer/approver cerută de docs/invoicing-spec.md se
+/// aplică la nivel de serviciu, nu ca o constrângere de schemă (un CHECK
+/// care ar interzice combinația ar trebui să cunoască regulile fiecărui
+/// modul, ceea ce ar rupe izolarea de modul — regula #2 din CLAUDE.md).
+model UserModuleRole {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  userId     String   @map("user_id") @db.Uuid
+  user       User     @relation(fields: [userId], references: [id])
+  moduleCode String   @map("module_code")
+  module     Module   @relation(fields: [moduleCode], references: [code])
+  role       String // ex. 'invoicing:issuer' — valorile valide sunt definite de fiecare modul
+  grantedAt  DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, userId, moduleCode, role])
+  @@index([tenantId, userId])
+  @@map("user_module_roles")
 }
 
 /// Catalogul de module disponibile pe platformă ('invoicing', 'inventory', ...).
@@ -54,9 +92,10 @@ model Module {
   billingType  String    @map("billing_type") // CHECK: 'flat' | 'metered' | 'seat' — vezi migrarea SQL
   releasedAt   DateTime? @map("released_at") @db.Date
 
-  plans         Plan[]
-  tenantModules TenantModule[]
-  usageEvents   UsageEvent[]
+  plans           Plan[]
+  tenantModules   TenantModule[]
+  usageEvents     UsageEvent[]
+  userModuleRoles UserModuleRole[]
 
   @@map("modules")
 }
@@ -131,4 +170,183 @@ model UsageEvent {
 
   @@index([tenantId, moduleCode])
   @@map("usage_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Modulul 1 — Facturare. Schema completă + motivația fiecărui câmp:
+// docs/invoicing-spec.md. Mapare SAF-T oficială: docs/saft-mapping.md.
+// Regulă: nu edita coloane retroactiv pe un rând deja emis (status >=
+// issued) — orice corecție e o notă de credit nouă (CLAUDE.md).
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Clienți emitenți de facturi — CustomerID/CompanyName (SAF-T).
+model Customer {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  customerCode      String   @map("customer_code")
+  taxId             String?  @map("tax_id") // CustomerTaxID (SAF-T) — CUI/CNP
+  name              String
+  address           String?
+  postalCode        String?  @map("postal_code")
+  city              String?
+  country           String   @default("RO")
+  isVatPayer        Boolean  @default(true) @map("is_vat_payer")
+  preferredLanguage String   @default("ro") @map("preferred_language")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoices Invoice[]
+
+  @@unique([tenantId, customerCode])
+  @@index([tenantId])
+  @@map("customers")
+}
+
+/// Produse/servicii — ProductCode/ProductDescription (SAF-T). `defaultTaxType`
+/// e categorie (Standard/Reduced/Exempt), nu o cotă înghețată — rata efectivă
+/// se rezolvă din TaxCode la momentul facturării (vezi invoicing-spec.md).
+model Product {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  productCode    String   @map("product_code")
+  description    String
+  unitOfMeasure  String   @map("unit_of_measure")
+  defaultTaxType String   @map("default_tax_type") // CHECK: 'Standard' | 'Reduced' | 'Exempt'
+  unitPrice      Decimal? @map("unit_price") @db.Decimal(14, 2)
+  revenueAccount String   @default("707") @map("revenue_account") // pregătire Modulul 3
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoiceLines InvoiceLine[]
+
+  @@unique([tenantId, productCode])
+  @@index([tenantId])
+  @@map("products")
+}
+
+/// TaxTable (SAF-T) — istoric complet de cote TVA, niciodată doar valoarea
+/// curentă. `validTo = null` înseamnă cotă activă acum; cotele vechi rămân
+/// în tabel, nu se șterg niciodată, dar nu pot fi alese pentru un document
+/// nou. Ține și contul contabil (vat_account_output/input) — pregătire
+/// Modulul 3, vezi invoicing-spec.md, secțiunea „De ce tax_codes ține și
+/// contul contabil".
+model TaxCode {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taxCode          String    @map("tax_code") // 'S21' | 'R11' | 'E' | 'S19' | 'R9' | 'R5'...
+  taxType          String    @map("tax_type") // 'Standard' | 'Reduced' | 'Exempt'
+  taxPercentage    Decimal   @map("tax_percentage") @db.Decimal(5, 2)
+  validFrom        DateTime  @map("valid_from") @db.Date
+  // CHECK: valid_to IS NULL OR valid_to > valid_from — vezi migrarea SQL
+  // (Prisma nu diff-uiește CHECK-uri custom, la fel ca celelalte din acest
+  // fișier; interval semi-deschis [validFrom, validTo) — validTo e prima
+  // zi NEvalidă, nu ultima zi validă, per query-ul din invoicing-spec.md).
+  validTo          DateTime? @map("valid_to") @db.Date
+  isDefault        Boolean   @default(false) @map("is_default")
+  vatAccountOutput String?   @map("vat_account_output") // ex. 4427 — TVA colectată
+  vatAccountInput  String?   @map("vat_account_input") // ex. 4426 — TVA deductibilă
+  description      String
+
+  invoiceLines InvoiceLine[]
+
+  @@unique([taxCode, validFrom])
+  @@map("tax_codes")
+}
+
+/// Serii de numerotare per tip de document ('FACT', 'PROF', 'AVANS', 'STORNO').
+model InvoiceSeries {
+  id           String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String @map("tenant_id") @db.Uuid
+  tenant       Tenant @relation(fields: [tenantId], references: [id])
+  seriesCode   String @map("series_code")
+  documentType String @map("document_type") // CHECK: invoice|proforma|credit_note|debit_note|down_payment
+  nextNumber   Int    @default(1) @map("next_number")
+
+  invoices Invoice[]
+
+  @@unique([tenantId, seriesCode])
+  @@index([tenantId])
+  @@map("invoice_series")
+}
+
+/// SalesInvoices (SAF-T). Status `draft` e singurul mutabil — `issued` și
+/// ulterior sunt imutabile (orice corecție e o notă de credit nouă, legată
+/// prin `reversedInvoiceId`). `eInvoiceStatus` urmărește transmiterea
+/// automată e-Factura (obligatorie, declanșată la draft→issued — CLAUDE.md).
+model Invoice {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  seriesId          String   @map("series_id") @db.Uuid
+  series            InvoiceSeries @relation(fields: [seriesId], references: [id])
+  invoiceNo         String   @map("invoice_no") // InvoiceNo (SAF-T)
+  invoiceDate       DateTime @map("invoice_date") @db.Date
+  taxPointDate      DateTime @map("tax_point_date") @db.Date
+  invoiceType       String   @map("invoice_type") // CHECK: Normal|CreditNote|DebitNote|DownPayment
+  customerId        String   @map("customer_id") @db.Uuid
+  customer          Customer @relation(fields: [customerId], references: [id])
+  currency          String   @default("RON")
+  exchangeRate      Decimal  @default(1) @map("exchange_rate") @db.Decimal(12, 6)
+  status            String   // CHECK: draft|issued|sent|paid|partially_paid|overdue|canceled
+  invoiceAmount     Decimal  @map("invoice_amount") @db.Decimal(14, 2) // InvoiceAmount (SAF-T)
+  // storno -> factura originală. onDelete: Restrict explicit (nu implicitul
+  // SetNull al Prisma pt. relații opționale) — o notă de credit nu trebuie
+  // să-și piardă niciodată trasabilitatea către originalul stornat, cerință
+  // SAF-T/audit directă. CHECK reversed_invoice_id <> id — vezi migrarea SQL.
+  reversedInvoiceId String?  @map("reversed_invoice_id") @db.Uuid
+  reversedInvoice   Invoice? @relation("InvoiceReversal", fields: [reversedInvoiceId], references: [id], onDelete: Restrict)
+  reversedBy        Invoice[] @relation("InvoiceReversal")
+  eInvoiceId        String?  @map("e_invoice_id") // eInvoiceID (SAF-T) — id SPV
+  eInvoiceStatus    String?  @map("e_invoice_status") // pending | validated | rejected | error
+  createdBy         String   @map("created_by") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  lines    InvoiceLine[]
+  auditLog InvoiceAuditLog[]
+
+  @@unique([tenantId, seriesId, invoiceNo])
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([status])
+  @@index([invoiceDate])
+  @@map("invoices")
+}
+
+/// InvoiceLine (SAF-T). `taxCodeId` e rândul exact din TaxCode rezolvat la
+/// momentul facturării, înghețat — nu se recalculează retroactiv la
+/// schimbarea legii (vezi invoicing-spec.md, „Rezolvarea cotei TVA").
+model InvoiceLine {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId     String  @map("invoice_id") @db.Uuid
+  invoice       Invoice @relation(fields: [invoiceId], references: [id])
+  lineNumber    Int     @map("line_number") // LineNumber (SAF-T)
+  // onDelete: Restrict explicit (nu implicitul SetNull) — un Product șters
+  // nu trebuie să lase o linie de factură deja emisă fără ProductCode
+  // (câmp obligatoriu SAF-T, nedenormalizat pe invoice_lines).
+  productId     String? @map("product_id") @db.Uuid
+  product       Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  description   String
+  quantity      Decimal @db.Decimal(14, 3)
+  unitOfMeasure String  @map("unit_of_measure")
+  unitPrice     Decimal @map("unit_price") @db.Decimal(14, 4)
+  lineAmount    Decimal @map("line_amount") @db.Decimal(14, 2) // LineAmount (SAF-T)
+  taxCodeId     String  @map("tax_code_id") @db.Uuid // TaxID (SAF-T)
+  taxCode       TaxCode @relation(fields: [taxCodeId], references: [id])
+  taxAmount     Decimal @map("tax_amount") @db.Decimal(14, 2) // TaxAmount (SAF-T)
+
+  @@unique([invoiceId, lineNumber])
+  @@map("invoice_lines")
+}
+
+/// Traseu de audit obligatoriu pe orice acțiune ireversibilă a unei facturi.
+model InvoiceAuditLog {
+  id          BigInt   @id @default(autoincrement())
+  invoiceId   String   @map("invoice_id") @db.Uuid
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  action      String   // created | issued | sent | paid | canceled
+  performedBy String   @map("performed_by") @db.Uuid
+  performedAt DateTime @default(now()) @map("performed_at") @db.Timestamptz(6)
+  details     Json?
+
+  @@index([invoiceId])
+  @@map("invoice_audit_log")
 }

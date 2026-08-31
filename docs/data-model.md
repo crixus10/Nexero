@@ -13,10 +13,21 @@ justificarea în istoricul sesiunii). Migrări (în ordine):
 `20260827083021_add_processed_webhook_events` (idempotență webhook-uri —
 vezi secțiunea „Tiparul de activare” mai jos) și
 `20260827084922_add_last_event_at_and_subscription_unique` (gardă de
-ordonare pe evenimente Stripe + `@@unique` pe `stripe_subscription_id`).
-SQL-ul de mai jos descrie conceptul; schema reală, cu `CHECK`-uri incluse,
-e în acele fișiere — nu le regenera de la zero, extinde-le cu
-`prisma migrate dev`.
+ordonare pe evenimente Stripe + `@@unique` pe `stripe_subscription_id`) și
+`20260827150000_add_invoicing_schema` (cele 7 tabele ale Modulului 1 —
+`customers`, `products`, `tax_codes`, `invoice_series`, `invoices`,
+`invoice_lines`, `invoice_audit_log` — schema completă, motivația fiecărui
+câmp și maparea SAF-T: `docs/invoicing-spec.md`/`docs/saft-mapping.md`, nu
+duplicate aici). **Notă pe această ultimă migrare**: SQL-ul a fost scris
+inițial manual și aplicat/validat cu `psql` împotriva unei baze reale
+(replicând întreg istoricul de migrări anterioare), pentru că mediul în
+care a fost creată nu avea acces la `binaries.prisma.sh`. **Validat ulterior
+și de motorul Prisma**: `npx prisma migrate dev` rulat local (26.08.2026) a
+răspuns „Already in sync, no schema change or pending migration found” —
+zero drift confirmat între `schema.prisma` și migrarea aplicată, deci
+migrarea e definitivă, nu doar validată manual. SQL-ul de mai jos descrie
+conceptul; schema reală, cu `CHECK`-urile incluse, e în acele fișiere — nu
+le regenera de la zero, extinde-le cu `prisma migrate dev`.
 
 Generator: `prisma-client-js` (clasic, motor binar) — **deliberat, nu**
 noul generator `prisma-client` (WASM/ESM), care rupe Jest fără flag-uri
@@ -339,3 +350,140 @@ plată confirmată → 4. `tenant_modules.status = active` (sau `past_due` /
 200 OK, acces permis / 6b. 403, modul inactiv → 7. (dacă metered)
 interceptor scrie în `usage_events` → 8. job lunar generează factură de
 consum.
+
+## RBAC — `users.role` (global) + `user_module_roles` (per-modul)
+
+**Implementat** (nu doar schemă) — `src/users/` (management complet de
+useri) + `src/rbac/` (guard-uri), nucleu, ca `src/auth/`, `src/entitlements/`.
+Migrare: `prisma/migrations/20260831171502_add_user_roles/`.
+
+**Două niveluri de rol, nu unul — nu le confunda:**
+
+- `users.role` e rolul **global, pe companie** (gestiune utilizatori,
+  restricționează `src/users/`) — grosier, un singur enum valabil pentru
+  orice modul: `owner | admin | accountant | operator`.
+- Rolurile **per-modul** (ex. `invoicing:viewer/issuer/approver/admin`,
+  documentate în `docs/invoicing-spec.md`) au nevoie de granularitate pe
+  care un singur enum global n-o poate exprima — un `operator` global
+  poate fi `invoicing:issuer` fără să fie și `invoicing:approver` (cerință
+  de segregare a responsabilităților din invoicing-spec.md). De asta există
+  tabelul `user_module_roles`, separat de coloana `role`. Fiecare modul își
+  definește propriile valori valide de rol în propriul fișier de
+  specificație (nu aici) — acest tabel e doar mecanismul comun de stocare,
+  reutilizabil de orice modul viitor cu roluri granulare.
+
+```sql
+-- Extensie pe users (deja existent, vezi „Autentificare (JWT)" mai sus) —
+-- coloane noi, nu tabel nou. users.email rămâne UNIQUE global, decizie deja
+-- fixată prin implementare — nu redeschide la adăugarea acestor coloane.
+-- Rol GLOBAL (companie), NU rolul per-modul de mai jos.
+ALTER TABLE users ADD COLUMN full_name  TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN role       TEXT NOT NULL DEFAULT 'operator'
+  CHECK (role IN ('owner','admin','accountant','operator'));
+ALTER TABLE users ADD COLUMN is_active  BOOLEAN NOT NULL DEFAULT true;
+
+-- Roluri per-modul — granularitate pe care users.role nu o poate exprima
+-- (vezi nota de mai sus). Un user poate avea mai multe rânduri (mai multe
+-- roluri) pe același modul, ex. viewer + issuer simultan; segregarea
+-- issuer/approver cerută de docs/invoicing-spec.md se aplică la nivel de
+-- serviciu (nu-i asigna pe amândouă aceluiași user), nu ca o constrângere
+-- de schemă — un CHECK care ar interzice combinația ar trebui să cunoască
+-- regulile fiecărui modul, ceea ce ar rupe izolarea de modul (regula #2).
+CREATE TABLE user_module_roles (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    UUID NOT NULL REFERENCES tenants(id),
+  user_id      UUID NOT NULL REFERENCES users(id),
+  module_code  TEXT NOT NULL REFERENCES modules(code),
+  role         TEXT NOT NULL, -- ex. 'invoicing:viewer' — valorile valide
+                               -- sunt definite de fiecare modul în propriul
+                               -- fișier de specificație, nu aici
+  granted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, user_id, module_code, role)
+);
+```
+
+**Guard-uri** (`src/rbac/`) — la fel ca `ModuleGuard`, citire LIVE din DB la
+fiecare request (niciodată din JWT — dacă un owner retrogradează pe cineva,
+îi revocă un rol de modul, SAU îl dezactivează (`isActive: false`), efectul
+e imediat, nu așteaptă expirarea unui token deja emis — ambele guard-uri de
+mai jos filtrează explicit `isActive: true`, nu doar rolul), globale
+(`APP_GUARD`), no-op fără decorator, aceeași plasă defensivă
+`if (!request.user)`:
+
+- `GlobalRoleGuard` + `@RequireGlobalRole('owner', 'admin')` — verifică
+  `users.role`. Folosit azi doar pe `UsersController` (`src/users/`).
+- `ModuleRoleGuard` + `@RequireModuleRole('invoicing:issuer', ...)` —
+  verifică `user_module_roles`, „oricare din" lista dată. Se pune
+  ÎMPREUNĂ cu `@RequireModule('x')` pe același handler, nu în locul lui —
+  primul verifică dacă firma are modulul activ, al doilea verifică CINE din
+  firmă poate face acțiunea. Exemplu real:
+  `src/modules/invoicing/invoices/invoices.controller.ts`.
+
+`RbacModule` (`src/rbac/rbac.module.ts`) trebuie importat DUPĂ `AuthModule`
+în `app.module.ts` — aceeași cerință de ordine ca `EntitlementsModule`.
+
+**`owner` — regulă specială, în ambele capete ale ciclului de viață**
+(fix logic-reviewer, audit holistic): un cont nou NU poate primi
+`role: 'owner'` direct la creare (`POST /users` — `CreateUserDto` acceptă
+doar `admin`/`accountant`/`operator`, vezi `CREATABLE_ROLES` în
+`src/users/dto/create-user.dto.ts`) — un owner nou se obține DOAR prin
+promovarea unui user existent (`PATCH /users/:id`, `UsersService.update()`),
+și doar dacă apelantul e el însuși `owner` (verificat live, în aceeași
+tranzacție). Fără ambele reguli, orice `admin` ar putea crea/auto-promova
+la `owner` fără control — exact breșa găsită și corectată în această
+sesiune. Simetric cu protecția „nu rămâne firma fără owner activ" (aceeași
+metodă `update()`), tot sub tranzacție `Serializable`.
+
+## Tabele suplimentare — admin platformă, plăți
+
+Extensie propusă, nu încă implementată — de adăugat prin migrări Prisma
+noi (`prisma migrate dev`), nu prin editarea migrărilor existente. Necesare
+pentru Panelul Admin Intern (`docs/platform-admin-spec.md`).
+
+```sql
+-- Staff Mittani Solutions — NU un tenant, NU un client, fără tenant_id
+CREATE TABLE platform_admins (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email          TEXT NOT NULL UNIQUE,
+  password_hash  TEXT NOT NULL,
+  full_name      TEXT NOT NULL,
+  role           TEXT NOT NULL DEFAULT 'admin'
+    CHECK (role IN ('admin','viewer')),
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_login_at  TIMESTAMPTZ
+);
+
+-- Jurnal de încasări Stripe/Netopia — istoric, nu doar starea curentă din
+-- tenant_modules. Scris EXCLUSIV din handler-ul de webhook existent
+-- (src/payments/), în aceeași tranzacție cu upsert-ul pe tenant_modules —
+-- același tipar de idempotență (processed_webhook_events) descris mai sus.
+CREATE TABLE payments (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             UUID NOT NULL REFERENCES tenants(id),
+  provider              TEXT NOT NULL CHECK (provider IN ('stripe','netopia')),
+  provider_payment_id   TEXT NOT NULL,
+  amount_cents          INTEGER NOT NULL,
+  currency              TEXT NOT NULL DEFAULT 'RON',
+  status                TEXT NOT NULL
+    CHECK (status IN ('succeeded','failed','refunded','pending')),
+  plan_code             TEXT NOT NULL,
+  invoice_period_start  DATE,
+  invoice_period_end    DATE,
+  raw_payload           JSONB,
+  received_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (provider, provider_payment_id)
+);
+```
+
+`platform_admins` e tabelul care lipsește intenționat din regula „orice
+query filtrează după `tenant_id`" (regula #6 din `CLAUDE.md`) — nu pentru
+că e o excepție de conveniență, ci pentru că nu descrie deloc un tenant.
+Detaliu complet al panelului care îl folosește: `docs/platform-admin-spec.md`.
+
+Schemele modulelor Portal Clienți (`portal_users`, `portal_user_links`,
+`portal_login_tokens`) și add-on AI (`purchase_documents`) stau în propriile
+fișiere de specificație (`docs/customer-portal-spec.md`,
+`docs/ai-addon-spec.md`), nu aici — urmează convenția „fiecare modul de
+business are propriile tabele, separate de nucleul de entitlements" de mai
+sus.

@@ -10,12 +10,9 @@ infrastructură": ≈ 11-15 €/lună la pornire). Nu k8s, nu multi-server — u
 monolit modular pe un singur VPS, per `docs/architecture.md` ("De ce
 monolit modular").
 
-**O decizie nouă, nefixată încă în `docs/architecture.md`**: reverse proxy
-+ TLS. Runbook-ul de mai jos folosește **Caddy** (HTTPS automat via Let's
-Encrypt, config de câteva linii, un singur binar) — ales pentru că se
-potrivește filosofiei „cost mic, control total", nu pentru că ar fi deja
-decizie fixată. Confirmă explicit înainte să-l consideri canon; odată
-confirmat, adaugă-l în `docs/architecture.md` ca decizie de stack.
+Reverse proxy + TLS: **Caddy** (HTTPS automat via Let's Encrypt, config de
+câteva linii, un singur binar) — decizie confirmată, fixată în
+`docs/architecture.md` ("De ce Caddy") și în `CLAUDE.md`.
 
 ## 0. Ce se instalează unde
 
@@ -223,6 +220,3 @@ direct pe server (unde oricum se face deploy-ul), nu local.
 - **Deploy automat din CI/CD** — `.github/workflows/ci.yml` face doar
   lint + build. Un job de deploy (SSH + `git pull` + `up -d --build`, sau
   un flux cu registry de imagini) e pas ulterior, cerut explicit separat.
-- **Reverse proxy = Caddy** — vezi nota de la începutul documentului;
-  confirmă explicit înainte să devină decizie fixată în
-  `docs/architecture.md`.

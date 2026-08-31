@@ -7,6 +7,9 @@ aici (adaugă o linie „Decizie: ...” sub tabel).
 | # | Modul | De ce în această ordine | Cross-sell |
 |---|---|---|---|
 | 1 | Facturare + e-Factura ANAF | Obligație legală — clienții au nevoie acum; se vinde singur, fără restul ERP-ului | — |
+| 1+ | Add-on AI (OCR facturi/bonuri de achiziție) | Construit imediat alături de Modulul 1, nu numerotat separat — cost de integrare mic, caz de folosire validat de la lansare, dublu rol (funcție + cârlig public de achiziție clienți); specificație completă `docs/ai-addon-spec.md` | demo public fără cont → conversie la trial |
+| 1+ | Portal Clienți | Construit imediat alături de Modulul 1 — notificare automată la fiecare factură emisă, identitate de portal unică pe platformă (`docs/customer-portal-spec.md`) | destinatar de factură → potențial tenant nou |
+| 1+ | Panel Admin Intern (doar Mittani Solutions) | Construit imediat alături de Modulul 1, de îndată ce există încasări reale de urmărit — invizibil pentru clienți, acces exclusiv prin `PlatformAdminGuard` (`docs/platform-admin-spec.md`) | — (tooling intern, nu se vinde) |
 | 2 | Stocuri + clienți/furnizori | Extensie naturală pentru cine are deja modulul 1; cost de achiziție ≈ 0 | upsell pe baza existentă |
 | 3 | Contabilitate primară + rapoarte + SAF-T | A doua obligație legală; deschide segmentul cabinete contabile (canal de volum) | cross-sell către contabili |
 | 4 | CRM simplu | Cerere organică de la clienți care vor gestiune vânzări/lead-uri | upsell segment Business |
@@ -22,6 +25,11 @@ Documentele oficiale ANAF pentru declarația SAF-T (D406) sunt în
   secțiunile de tranzacții).
 - `RO_SAFT_SchemaDefCod_16.02.2026.xlsx` — definiția câmp-cu-câmp + coduri.
 - `SAF_T_Ghidul_D406_1712021.pdf` — ghidul explicativ ANAF.
+
+`docs/saft-mapping.md` distilează din aceste documente doar câmpurile
+relevante pentru Modulul 1 (TaxTable, SalesInvoices, GeneralLedgerAccounts)
+— referință rapidă, nu înlocuiește documentele oficiale de mai sus la
+construcția efectivă a Modulului 3.
 
 **Regulă:** structura de date a fiecărui modul de business (facturare,
 stocuri, contabilitate) se proiectează având ca referință obligatorie
@@ -52,6 +60,31 @@ _(Actualizează manual sau prin Claude Code pe măsură ce construiești —
 instant unde s-a rămas fără să exploreze tot codul.)_
 
 - [ ] Modulul 1 — Facturare + e-Factura ANAF
+  - Progres (fazare auto-conținută în repo — NU exista/nu se mai referă la
+    un plan extern `.docx`, urmărirea completă stă aici + `docs/invoicing-spec.md`):
+    [x] Fază A — schema (`prisma/migrations/20260827150000_add_invoicing_schema`
+    + `20260831163611_invoicing_schema_hardening`) + seed cote TVA;
+    [x] Fază B — CRUD clienți (validare CUI prin `src/integrations/anaf`) +
+    CRUD produse (`src/modules/invoicing/customers/`, `.../products/`);
+    [x] Fază C — motorul de facturare (`src/modules/invoicing/invoices/`,
+    `.../invoice-series/`): numerotare atomică pe serie, creare factură
+    draft + linii, rezolvare cotă TVA pe linie (automat din categoria
+    produsului sau override manual), emitere (draft→issued) cu imutabilitate
+    impusă în service (nu doar convenție), verificare defensivă
+    liniile Σ = invoiceAmount la emitere, audit log, notă de credit (storno)
+    legată de original prin `reversedInvoiceId`, declanșare e-Factura (stub
+    — `AnafService.submitEInvoice`, status `pending`, fără transmitere
+    reală SPV încă — lipsesc credențiale OAuth ANAF);
+    [x] Fază D — RBAC per-modul (`user_module_roles` + `ModuleRoleGuard`) +
+    management complet de useri (`src/users/`, `GlobalRoleGuard`) — condiție
+    pentru segregarea issuer/approver cerută de `docs/invoicing-spec.md`,
+    verificată live end-to-end (revocare rol → 403 imediat, fără așteptare
+    expirare token);
+    [ ] restul (proformă/avans, facturi recurente, transmitere SPV reală,
+    e-TVA) — de detaliat când devine relevant, nu speculativ acum.
+- [ ] Add-on AI — OCR facturi/bonuri (+ demo public/cârlig)
+- [ ] Portal Clienți — notificare automată + identitate globală de portal
+- [ ] Panel Admin Intern — vizibil doar Mittani Solutions, plan/încasări/consum per client + agregate
 - [ ] Modulul 2 — Stocuri + clienți/furnizori
 - [ ] Modulul 3 — Contabilitate primară + SAF-T
 - [ ] Modulul 4 — CRM simplu
