@@ -37,9 +37,17 @@ export class ProductsService {
     }
   }
 
-  async findAll(tenantId: string): Promise<Product[]> {
+  async findAll(tenantId: string, q?: string): Promise<Product[]> {
     return this.prisma.product.findMany({
-      where: { tenantId },
+      where: q
+        ? {
+            tenantId,
+            OR: [
+              { description: { contains: q, mode: 'insensitive' } },
+              { productCode: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : { tenantId },
       orderBy: { description: 'asc' },
     });
   }
@@ -71,8 +79,21 @@ export class ProductsService {
     return this.findOne(tenantId, id);
   }
 
+  async remove(tenantId: string, id: string): Promise<void> {
+    try {
+      const { count } = await this.prisma.product.deleteMany({
+        where: { id, tenantId },
+      });
+      if (count === 0) {
+        throw new NotFoundException(`Produsul „${id}” nu există.`);
+      }
+    } catch (err) {
+      throw this.translateForeignKeyConstraint(err);
+    }
+  }
+
   private translateUniqueConstraint(err: unknown, productCode: string): Error {
-    if (this.isUniqueConstraintError(err)) {
+    if (this.isPrismaError(err, 'P2002')) {
       return new ConflictException(
         `Există deja un produs cu productCode „${productCode}” pentru această firmă.`,
       );
@@ -80,12 +101,25 @@ export class ProductsService {
     return err as Error;
   }
 
-  private isUniqueConstraintError(err: unknown): boolean {
+  private translateForeignKeyConstraint(err: unknown): Error {
+    // P2003 — produsul e referit de cel puțin o linie de factură
+    // (invoice_lines.product_id e ON DELETE RESTRICT, deliberat: ProductCode
+    // e obligatoriu SAF-T pe orice linie deja emisă). Ștergerea unui produs
+    // neutilizat rămâne posibilă.
+    if (this.isPrismaError(err, 'P2003')) {
+      return new ConflictException(
+        'Produsul nu poate fi șters — e folosit pe cel puțin o factură.',
+      );
+    }
+    return err instanceof Error ? err : (err as Error);
+  }
+
+  private isPrismaError(err: unknown, code: string): boolean {
     return (
       typeof err === 'object' &&
       err !== null &&
       'code' in err &&
-      err.code === 'P2002'
+      err.code === code
     );
   }
 }

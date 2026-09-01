@@ -12,6 +12,7 @@ describe('CustomersService', () => {
       findMany: jest.Mock;
       findFirst: jest.Mock;
       updateMany: jest.Mock;
+      deleteMany: jest.Mock;
     };
   };
   let anaf: { validateCui: jest.Mock };
@@ -24,6 +25,7 @@ describe('CustomersService', () => {
         findMany: jest.fn(),
         findFirst: jest.fn(),
         updateMany: jest.fn(),
+        deleteMany: jest.fn(),
       },
     };
     anaf = { validateCui: jest.fn() };
@@ -102,5 +104,58 @@ describe('CustomersService', () => {
     expect(prisma.customer.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'id-din-alt-tenant', tenantId } }),
     );
+  });
+
+  it('findAll caută case-insensitive pe name și customerCode când q e dat', async () => {
+    prisma.customer.findMany.mockResolvedValue([]);
+
+    await service.findAll(tenantId, 'firma');
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId,
+          OR: [
+            { name: { contains: 'firma', mode: 'insensitive' } },
+            { customerCode: { contains: 'firma', mode: 'insensitive' } },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('findAll filtrează doar după tenantId când q lipsește', async () => {
+    prisma.customer.findMany.mockResolvedValue([]);
+
+    await service.findAll(tenantId);
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId } }),
+    );
+  });
+
+  it('remove filtrează explicit după tenantId (regula #6) și dă 404 dacă nu potrivește', async () => {
+    prisma.customer.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.remove(tenantId, 'id-din-alt-tenant')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(prisma.customer.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'id-din-alt-tenant', tenantId },
+    });
+  });
+
+  it('remove traduce o încălcare de FK (client folosit pe o factură) într-un ConflictException', async () => {
+    prisma.customer.deleteMany.mockRejectedValue({ code: 'P2003' });
+
+    await expect(service.remove(tenantId, 'c1')).rejects.toThrow(
+      ConflictException,
+    );
+  });
+
+  it('remove șterge un client neutilizat fără erori', async () => {
+    prisma.customer.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(service.remove(tenantId, 'c1')).resolves.toBeUndefined();
   });
 });

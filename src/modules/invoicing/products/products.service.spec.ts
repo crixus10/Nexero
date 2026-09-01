@@ -11,6 +11,7 @@ describe('ProductsService', () => {
       findMany: jest.Mock;
       findFirst: jest.Mock;
       updateMany: jest.Mock;
+      deleteMany: jest.Mock;
     };
   };
   let service: ProductsService;
@@ -22,6 +23,7 @@ describe('ProductsService', () => {
         findMany: jest.fn(),
         findFirst: jest.fn(),
         updateMany: jest.fn(),
+        deleteMany: jest.fn(),
       },
     };
     service = new ProductsService(prisma as unknown as PrismaService);
@@ -84,5 +86,58 @@ describe('ProductsService', () => {
     expect(prisma.product.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'id-din-alt-tenant', tenantId } }),
     );
+  });
+
+  it('findAll caută case-insensitive pe description și productCode când q e dat', async () => {
+    prisma.product.findMany.mockResolvedValue([]);
+
+    await service.findAll(tenantId, 'consultanta');
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId,
+          OR: [
+            { description: { contains: 'consultanta', mode: 'insensitive' } },
+            { productCode: { contains: 'consultanta', mode: 'insensitive' } },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('findAll filtrează doar după tenantId când q lipsește', async () => {
+    prisma.product.findMany.mockResolvedValue([]);
+
+    await service.findAll(tenantId);
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId } }),
+    );
+  });
+
+  it('remove filtrează explicit după tenantId (regula #6) și dă 404 dacă nu potrivește', async () => {
+    prisma.product.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.remove(tenantId, 'id-din-alt-tenant')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(prisma.product.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'id-din-alt-tenant', tenantId },
+    });
+  });
+
+  it('remove traduce o încălcare de FK (produs folosit pe o factură) într-un ConflictException', async () => {
+    prisma.product.deleteMany.mockRejectedValue({ code: 'P2003' });
+
+    await expect(service.remove(tenantId, 'p1')).rejects.toThrow(
+      ConflictException,
+    );
+  });
+
+  it('remove șterge un produs neutilizat fără erori', async () => {
+    prisma.product.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(service.remove(tenantId, 'p1')).resolves.toBeUndefined();
   });
 });

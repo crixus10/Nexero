@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   // full_name/role să existe ca și coloane) l-ar lăsa cu default-ul DB
   // ('operator'), nu cu 'owner' — exact ce s-a întâmplat la verificarea
   // manuală a acestei sesiuni.
-  await prisma.user.upsert({
+  const testUser = await prisma.user.upsert({
     where: { email: TEST_EMAIL },
     update: {
       passwordHash,
@@ -186,6 +186,53 @@ async function main(): Promise<void> {
     },
   ];
 
+  // Entitlement activ + rol de modul — DOAR pentru testare locală end-to-
+  // end (UI din /web). NU e cum se activează un entitlement în producție
+  // (regula #4 din CLAUDE.md: exclusiv din webhook-ul de plată Stripe/
+  // Netopia, niciodată dintr-un endpoint apelabil de client) — dar acesta
+  // e un script de dev rulat direct contra bazei, nu un endpoint, deci nu
+  // încalcă regula. Fără el, orice rută `@RequireModule('invoicing')`/
+  // `@RequireModuleRole(...)` (deci tot UI-ul de facturare) ar da 403 pe
+  // userul de test, și singura alternativă ar fi rularea Stripe CLI local
+  // doar ca să apeși un buton „Creează factură".
+  await prisma.tenantModule.upsert({
+    where: {
+      tenantId_moduleCode: {
+        tenantId: tenant.id,
+        moduleCode: INVOICING_MODULE_CODE,
+      },
+    },
+    update: { status: 'active', planId: INVOICING_START_PLAN_ID },
+    create: {
+      tenantId: tenant.id,
+      moduleCode: INVOICING_MODULE_CODE,
+      planId: INVOICING_START_PLAN_ID,
+      status: 'active',
+    },
+  });
+  // invoicing:admin — acoperă toate rutele RBAC ale modulului (creare
+  // serii, facturi, emitere, note de credit) cu un singur rol, potrivit
+  // pentru un cont de test/owner, nu pentru segregarea reală issuer/
+  // approver (asta se testează separat, creând useri suplimentari prin
+  // src/users/ + UI-ul de management useri, nu prin seed).
+  await prisma.userModuleRole.upsert({
+    where: {
+      tenantId_userId_moduleCode_role: {
+        tenantId: tenant.id,
+        userId: testUser.id,
+        moduleCode: INVOICING_MODULE_CODE,
+        role: 'invoicing:admin',
+      },
+    },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      userId: testUser.id,
+      moduleCode: INVOICING_MODULE_CODE,
+      role: 'invoicing:admin',
+    },
+  });
+
   for (const tc of TAX_CODES) {
     await prisma.taxCode.upsert({
       where: {
@@ -216,7 +263,7 @@ async function main(): Promise<void> {
   console.log(`  parolă:   ${TEST_PASSWORD}`);
   console.log(`  tenantId: ${tenant.id}`);
   console.log(
-    `  modul "${INVOICING_MODULE_CODE}" + plan "start" înregistrate în catalog (fără entitlement activ, fără logică de facturare).`,
+    `  modul "${INVOICING_MODULE_CODE}" + plan "start": entitlement ACTIV (doar pt. testare locală, vezi comentariul din cod) + rol "invoicing:admin" acordat userului de test.`,
   );
   console.log(
     `  ${TAX_CODES.length} cote TVA seed-uite (3 curente + 3 istoric) — vezi docs/invoicing-spec.md.`,

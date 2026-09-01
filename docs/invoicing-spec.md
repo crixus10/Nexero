@@ -315,6 +315,16 @@ Un utilizator cu doar `issuer` nu poate și storna propriile facturi — asta
 previne o singură persoană să emită și să anuleze fără control, relevant la
 un audit SAF-T/ANAF.
 
+**Nomenclatoarele modulului** (clienți, produse, serii de facturare) — vezi
+`CustomersController`/`ProductsController`/`InvoiceSeriesController` —
+urmează același RBAC, dar segregat diferit față de facturi: citire —
+oricare din cele 4 roluri (un nomenclator, nu un document fiscal, deci
+`viewer`/`approver` au acces deplin de citire); creare/editare/ștergere
+clienți și produse — doar `issuer`+`admin` (parte din fluxul curent de
+emitere, nu o acțiune de stornare); creare/ștergere serii de numerotare —
+doar `admin` (o serie configurată greșit se șterge și se recreează, nu se
+editează — vezi `InvoiceSeriesService`, care omite deliberat `update()`).
+
 Aceste roluri se stochează în tabelul comun `user_module_roles`
 (`module_code = 'invoicing'`), NU în coloana globală `users.role` — cele
 două sunt niveluri separate de rol, vezi `docs/data-model.md`, secțiunea

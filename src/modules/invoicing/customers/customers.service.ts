@@ -57,9 +57,17 @@ export class CustomersService {
     }
   }
 
-  async findAll(tenantId: string): Promise<Customer[]> {
+  async findAll(tenantId: string, q?: string): Promise<Customer[]> {
     return this.prisma.customer.findMany({
-      where: { tenantId },
+      where: q
+        ? {
+            tenantId,
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { customerCode: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : { tenantId },
       orderBy: { name: 'asc' },
     });
   }
@@ -112,8 +120,23 @@ export class CustomersService {
     return this.findOne(tenantId, id);
   }
 
+  async remove(tenantId: string, id: string): Promise<void> {
+    try {
+      // deleteMany (nu delete) — where poate filtra pe tenantId direct
+      // (regula #6), la fel ca update()/updateMany de mai sus.
+      const { count } = await this.prisma.customer.deleteMany({
+        where: { id, tenantId },
+      });
+      if (count === 0) {
+        throw new NotFoundException(`Clientul „${id}” nu există.`);
+      }
+    } catch (err) {
+      throw this.translateForeignKeyConstraint(err);
+    }
+  }
+
   private translateUniqueConstraint(err: unknown, customerCode: string): Error {
-    if (this.isUniqueConstraintError(err)) {
+    if (this.isPrismaError(err, 'P2002')) {
       return new ConflictException(
         `Există deja un client cu customerCode „${customerCode}” pentru această firmă.`,
       );
@@ -121,12 +144,25 @@ export class CustomersService {
     return err as Error;
   }
 
-  private isUniqueConstraintError(err: unknown): boolean {
+  private translateForeignKeyConstraint(err: unknown): Error {
+    // P2003 — clientul e referit de cel puțin o factură (invoices.customer_id
+    // e ON DELETE RESTRICT, deliberat: o factură nu trebuie să rămână
+    // niciodată fără client rezolvabil). Ștergerea unui client neutilizat
+    // rămâne posibilă — doar cei deja folosiți pe un document sunt protejați.
+    if (this.isPrismaError(err, 'P2003')) {
+      return new ConflictException(
+        'Clientul nu poate fi șters — e folosit pe cel puțin o factură.',
+      );
+    }
+    return err instanceof Error ? err : (err as Error);
+  }
+
+  private isPrismaError(err: unknown, code: string): boolean {
     return (
       typeof err === 'object' &&
       err !== null &&
       'code' in err &&
-      err.code === 'P2002'
+      err.code === code
     );
   }
 }
