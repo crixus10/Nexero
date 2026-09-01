@@ -1,0 +1,17 @@
+/* Metronic Components — doar ce folosim azi. Restul (apexcharts, leaflet,
+   rating, image-input) nu sunt aduse încă — adaugă-le aici DOAR când chiar
+   se folosesc (grafice/hărți/rating încă nespecificate în docs/). */
+@import './layout.css';
+@import './components/scrollable.css';
+
+/** Dark/Light Theme Variant **/
+@custom-variant dark (&:is(.dark *));
+@custom-variant light (&:not(.dark *));
+
+/** Custom Font Size **/
+@theme {
+  --text-2sm: 0.8125rem;
+  --text-2sm--line-height: calc(1.075 / 0.8125);
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: calc(0.825 / 0.6875);
+}

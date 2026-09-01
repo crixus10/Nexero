@@ -28,3 +28,9 @@ coverage/
 # client Prisma (generat implicit în node_modules/@prisma/client, deja
 # acoperit de node_modules/ de mai sus — recreat prin `prisma generate`,
 # rulat automat la `npm install` via scriptul postinstall)
+
+# Asset comercial Metronic (ThemeForest) — licență Regular, doar pentru
+# dezvoltare locală (vezi CLAUDE.md, „Metronic — UI kit"). Niciodată în
+# git: e conținut licențiat + prea mare pentru un repo (sute de MB chiar
+# și trimmed). Rămâne doar local, pe mașina care face integrarea în /web.
+themeforest-*-metronic-*/

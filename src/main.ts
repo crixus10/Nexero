@@ -24,6 +24,16 @@ async function bootstrap() {
   // client și aplicație; de recalibrat dacă topologia reală diferă
   // (ex: Cloudflare + reverse proxy = 2 hop-uri).
   app.set('trust proxy', 1);
+  // CORS pentru frontend-ul React (/web) — origine explicită, nu '*'.
+  // JWT-ul e trimis manual în header-ul Authorization (nu cookie), deci
+  // `credentials: true` nu e necesar aici — dar un `origin` explicit tot e
+  // obligatoriu, altfel browserul blochează citirea răspunsului din alt
+  // origin. Implicit spre serverul de dev Vite (`npm run dev` în /web,
+  // vezi web/README.md) — suprascrie cu FRONTEND_URL în .env dacă rulezi
+  // frontend-ul pe alt port sau domeniu (ex. producție).
+  app.enableCors({
+    origin: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  });
   // Global: orice DTO nou (ex: LoginDto) e validat automat; whitelist
   // elimină câmpuri nedeclarate, forbidNonWhitelisted respinge cereri cu
   // câmpuri în plus în loc să le ignore silențios.
