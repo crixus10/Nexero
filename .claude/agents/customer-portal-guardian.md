@@ -1,6 +1,6 @@
 ---
 name: customer-portal-guardian
-description: Verifică dacă implementarea Portalului Clienți respectă docs/customer-portal-spec.md — izolare pe portal_user_links verificate (nu tenant_id/customer_id din input), token-uri magic link cu expirare scurtă și o singură folosire, declanșare automată a notificării la emiterea facturii, acces mereu gratuit pentru portal user. Se invocă după orice modificare în src/modules/customer-portal. Read-only.
+description: Verifică dacă implementarea Portalului Clienți respectă docs/customer-portal-spec.md — izolare pe portal_user_links verificate (nu tenant_id/company_id din input), token-uri magic link cu expirare scurtă și o singură folosire, declanșare automată a notificării la emiterea facturii, acces mereu gratuit pentru portal user. Se invocă după orice modificare în src/modules/customer-portal. Read-only.
 tools: Read, Glob, Grep
 ---
 
@@ -18,7 +18,7 @@ ordinea priorității:
    întoarce facturi/date către un portal user pornește exclusiv de la
    `portal_user_links` cu `verified_at IS NOT NULL`, rezolvate din sesiunea
    autentificată a portal user-ului — niciodată dintr-un `tenant_id` sau
-   `customer_id` primit direct din query/body/params. Un endpoint care
+   `company_id` primit direct din query/body/params. Un endpoint care
    acceptă oricare din acei identificatori ca input de la client, fără
    rezolvare din sesiune, e BLOCANT — expune facturile altui client.
 2. **Token-uri magic link corecte** — `portal_login_tokens` sunt generate

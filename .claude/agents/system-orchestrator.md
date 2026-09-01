@@ -21,10 +21,12 @@ presupune că lipsa unui raport înseamnă „fără probleme” la acel agent.
 ## Ce verifici
 
 1. **Contracte de dependență între module** — de exemplu, modulul Stocuri
-   extinde `products`/`customers` create de modulul Facturare
+   extinde `products` (Facturare) și `companies` (CRM, consumat prin FK de
+   Facturare — fost `customers`, mutat la Modulul 4, vezi
+   `docs/crm-spec.md`, „De ce Company înlocuiește Customer”)
    (`docs/invoicing-spec.md`, secțiunea „Dependență cu modulul Stocuri”):
    verifică în cod că identificatorii stabili (`product_code`,
-   `customer_code`) chiar sunt folosiți ca atare de ambele module, nu
+   `company_code`) chiar sunt folosiți ca atare de ambele module, nu
    redefiniți divergent.
 2. **Convenții inconsistente între rapoarte** — dacă `invoicing-guardian`
    presupune o convenție (ex. formatul `tenant_id`, un nume de coloană, o

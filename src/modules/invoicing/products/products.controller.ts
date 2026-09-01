@@ -17,8 +17,8 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
 
-// Vezi comentariul echivalent din CustomersController — aceeași segregare
-// pe cele 4 roluri de modul pentru nomenclatorul de produse.
+// Vezi comentariul echivalent din CompaniesController (modulul crm) —
+// aceeași segregare pe cele 4 roluri de modul pentru nomenclatorul de produse.
 const ANY_INVOICING_ROLE = [
   'invoicing:viewer',
   'invoicing:issuer',
@@ -29,7 +29,7 @@ const ANY_INVOICING_ROLE = [
 /**
  * Fază B.2 — CRUD produse/servicii. `@RequireModule('invoicing')` pe
  * FIECARE metodă, niciodată pe clasă — vezi comentariul echivalent din
- * CustomersController.
+ * CompaniesController (modulul crm).
  */
 @Controller('products')
 export class ProductsController {
@@ -52,9 +52,9 @@ export class ProductsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query('q') q?: string | string[],
   ) {
-    // Vezi comentariul echivalent din CustomersController — gardă
-    // defensivă contra `?q[]=a&q[]=b` (array), pe care Prisma `contains`
-    // nu-l acceptă.
+    // Vezi comentariul echivalent din CompaniesController (modulul crm) —
+    // gardă defensivă contra `?q[]=a&q[]=b` (array), pe care Prisma
+    // `contains` nu-l acceptă.
     return this.products.findAll(
       user.tenantId,
       Array.isArray(q) ? undefined : q,

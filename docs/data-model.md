@@ -18,7 +18,9 @@ ordonare pe evenimente Stripe + `@@unique` pe `stripe_subscription_id`) și
 `customers`, `products`, `tax_codes`, `invoice_series`, `invoices`,
 `invoice_lines`, `invoice_audit_log` — schema completă, motivația fiecărui
 câmp și maparea SAF-T: `docs/invoicing-spec.md`/`docs/saft-mapping.md`, nu
-duplicate aici). **Notă pe această ultimă migrare**: SQL-ul a fost scris
+duplicate aici; `customers` redenumit ulterior **`companies`** de migrarea
+`20260901160000_add_crm_module` — RENAME, nu DROP+CREATE — la mutarea
+nomenclatorului de clienți în Modulul 4 (CRM), vezi `docs/crm-spec.md`). **Notă pe această ultimă migrare**: SQL-ul a fost scris
 inițial manual și aplicat/validat cu `psql` împotriva unei baze reale
 (replicând întreg istoricul de migrări anterioare), pentru că mediul în
 care a fost creată nu avea acces la `binaries.prisma.sh`. **Validat ulterior
@@ -113,6 +115,37 @@ business în `tenant_modules` — el rămâne strict despre acces și facturare.
 lucrează pentru mai mulți clienți (asta ar cere un tabel de asociere
 many-to-many) — de construit doar când apare cerința reală, per regulile
 din `docs/roadmap.md`, nu speculativ acum.
+
+## Coduri auto-generate (`code_sequences`)
+
+```sql
+-- Contor secvențial per tenant + tip de entitate, pentru coduri
+-- auto-generate afișate în UI (CLI-0001, PRD-0001, CTC-0001,
+-- DEAL-2026-0001...) — NU pentru numerotarea legală de facturi
+-- (invoice_series.next_number, vezi docs/invoicing-spec.md), care are
+-- propria garanție „fără goluri" + tranzacție comună cu inserarea facturii.
+CREATE TABLE code_sequences (
+  tenant_id    UUID NOT NULL REFERENCES tenants(id),
+  entity_type  TEXT NOT NULL,   -- 'company' | 'product' | 'contact' | 'deal:2026' | ...
+  next_value   INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (tenant_id, entity_type)
+);
+```
+
+Mecanism de NUCLEU (`src/common/code-sequence.service.ts`,
+`CodeSequenceService`, modul global — injectabil din orice modul de
+business fără import explicit, ca `PrismaService`), reutilizat azi de
+`products` (modulul Facturare) și `companies`/`contacts`/`deals` (modulul
+CRM — `companies` a trecut în proprietatea CRM la mutare, consumat prin FK
+de Facturare, vezi `docs/crm-spec.md`). Alocare atomică prin `upsert` cu
+`{ nextValue: { increment: 1 } }` (INSERT ... ON CONFLICT DO UPDATE la
+nivel de Postgres) — niciodată `MAX(cod)+1` (cursă la concurență).
+`entity_type` poate include un sufix variabil (ex. `deal:2026`) pentru o
+secvență care se resetează logic per an — tratat ca o cheie distinctă,
+nu o coloană separată.
+
+Orice modul nou care are nevoie de un cod mnemonic auto-generat
+folosește acest serviciu, nu reinventă propriul contor.
 
 ## Autentificare (JWT)
 

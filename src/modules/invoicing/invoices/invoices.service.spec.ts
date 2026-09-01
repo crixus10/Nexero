@@ -15,7 +15,7 @@ describe('InvoicesService', () => {
   const invoiceDate = '2026-08-31';
 
   let prisma: {
-    customer: { findFirst: jest.Mock };
+    company: { findFirst: jest.Mock };
     invoice: {
       findFirst: jest.Mock;
       findMany: jest.Mock;
@@ -65,7 +65,7 @@ describe('InvoicesService', () => {
       product: { findFirst: jest.fn() },
     };
     prisma = {
-      customer: { findFirst: jest.fn() },
+      company: { findFirst: jest.fn() },
       invoice: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
@@ -85,7 +85,7 @@ describe('InvoicesService', () => {
   describe('createDraft', () => {
     const baseDto: CreateInvoiceDto = {
       seriesCode: 'FACT',
-      customerId: 'cust-1',
+      companyId: 'cust-1',
       invoiceDate,
       lines: [
         {
@@ -99,14 +99,14 @@ describe('InvoicesService', () => {
     };
 
     it('aruncă NotFoundException dacă clientul nu există în tenant', async () => {
-      prisma.customer.findFirst.mockResolvedValue(null);
+      prisma.company.findFirst.mockResolvedValue(null);
       await expect(
         service.createDraft(tenantId, userId, baseDto),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('aruncă NotFoundException dacă seria nu există', async () => {
-      prisma.customer.findFirst.mockResolvedValue({ id: 'cust-1' });
+      prisma.company.findFirst.mockResolvedValue({ id: 'cust-1' });
       prisma.invoiceSeries.findFirst.mockResolvedValue(null);
       await expect(
         service.createDraft(tenantId, userId, baseDto),
@@ -114,7 +114,7 @@ describe('InvoicesService', () => {
     });
 
     it('rezolvă cota TVA din categoria produsului, calculează sumele și alocă numărul atomic', async () => {
-      prisma.customer.findFirst.mockResolvedValue({ id: 'cust-1' });
+      prisma.company.findFirst.mockResolvedValue({ id: 'cust-1' });
       prisma.invoiceSeries.findFirst.mockResolvedValue({
         id: 'series-1',
         tenantId,
@@ -164,7 +164,7 @@ describe('InvoicesService', () => {
     });
 
     it('linie fără productId și fără taxCodeId → BadRequestException', async () => {
-      prisma.customer.findFirst.mockResolvedValue({ id: 'cust-1' });
+      prisma.company.findFirst.mockResolvedValue({ id: 'cust-1' });
       prisma.invoiceSeries.findFirst.mockResolvedValue({
         id: 'series-1',
         tenantId,
@@ -189,7 +189,7 @@ describe('InvoicesService', () => {
     });
 
     it('nicio cotă TVA validă la data facturii → ConflictException (fix logic-reviewer, gol seed 2025-07-31)', async () => {
-      prisma.customer.findFirst.mockResolvedValue({ id: 'cust-1' });
+      prisma.company.findFirst.mockResolvedValue({ id: 'cust-1' });
       prisma.invoiceSeries.findFirst.mockResolvedValue({
         id: 'series-1',
         tenantId,
@@ -207,7 +207,7 @@ describe('InvoicesService', () => {
     });
 
     it('taxCodeId explicit (override manual) e folosit fără să mai consulte produsul', async () => {
-      prisma.customer.findFirst.mockResolvedValue({ id: 'cust-1' });
+      prisma.company.findFirst.mockResolvedValue({ id: 'cust-1' });
       prisma.invoiceSeries.findFirst.mockResolvedValue({
         id: 'series-1',
         tenantId,
@@ -340,7 +340,7 @@ describe('InvoicesService', () => {
         id: 'orig-1',
         tenantId,
         status: 'draft',
-        customerId: 'cust-1',
+        companyId: 'cust-1',
         lines: [],
       });
 
@@ -365,7 +365,7 @@ describe('InvoicesService', () => {
         id: 'orig-1',
         tenantId,
         status: 'issued',
-        customerId: 'cust-1',
+        companyId: 'cust-1',
         currency: 'EUR',
         exchangeRate: new Prisma.Decimal('4.97'),
         invoiceAmount: new Prisma.Decimal('100'),
@@ -404,7 +404,7 @@ describe('InvoicesService', () => {
 
       expect(createData?.invoiceType).toBe('CreditNote');
       expect(createData?.reversedInvoiceId).toBe('orig-1');
-      expect(createData?.customerId).toBe('cust-1');
+      expect(createData?.companyId).toBe('cust-1');
       // fix logic-reviewer — moneda/cursul se moștenesc din original, nu
       // cad pe implicit RON/1.
       expect(createData?.currency).toBe('EUR');
@@ -418,7 +418,7 @@ describe('InvoicesService', () => {
         id: 'orig-1',
         tenantId,
         status: 'issued',
-        customerId: 'cust-1',
+        companyId: 'cust-1',
         currency: 'RON',
         exchangeRate: new Prisma.Decimal('1'),
         invoiceAmount: new Prisma.Decimal('100'), // deja stornat 90 mai jos

@@ -235,7 +235,6 @@ function ProductFormDialog({
   onSaved: () => void;
 }) {
   const isEdit = !!product;
-  const [productCode, setProductCode] = useState('');
   const [description, setDescription] = useState('');
   const [unitOfMeasure, setUnitOfMeasure] = useState('buc');
   const [defaultTaxType, setDefaultTaxType] = useState<TaxType>('Standard');
@@ -246,7 +245,6 @@ function ProductFormDialog({
 
   useEffect(() => {
     if (open) {
-      setProductCode(product?.productCode ?? '');
       setDescription(product?.description ?? '');
       setUnitOfMeasure(product?.unitOfMeasure ?? 'buc');
       setDefaultTaxType(product?.defaultTaxType ?? 'Standard');
@@ -275,7 +273,6 @@ function ProductFormDialog({
         });
       } else {
         await ProductsApi.create({
-          productCode,
           description,
           unitOfMeasure,
           defaultTaxType,
@@ -300,27 +297,6 @@ function ProductFormDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <DialogBody className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="productCode">Cod produs</Label>
-                <Input
-                  id="productCode"
-                  required
-                  disabled={isEdit}
-                  value={productCode}
-                  onChange={(e) => setProductCode(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="unitOfMeasure">U.M.</Label>
-                <Input
-                  id="unitOfMeasure"
-                  required
-                  value={unitOfMeasure}
-                  onChange={(e) => setUnitOfMeasure(e.target.value)}
-                />
-              </div>
-            </div>
             <div className="space-y-1.5">
               <Label htmlFor="description">Descriere</Label>
               <Input
@@ -328,6 +304,15 @@ function ProductFormDialog({
                 required
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="unitOfMeasure">U.M.</Label>
+              <Input
+                id="unitOfMeasure"
+                required
+                value={unitOfMeasure}
+                onChange={(e) => setUnitOfMeasure(e.target.value)}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">

@@ -19,6 +19,13 @@ const SALT_ROUNDS = 10;
 const INVOICING_MODULE_CODE = 'invoicing';
 const INVOICING_START_PLAN_ID = '00000000-0000-0000-0000-000000000002';
 
+// Modulul CRM ("Clienți" în UI), per docs/roadmap.md — Modulul 4, construit
+// înaintea Modulelor 2-3 la cererea explicită a utilizatorului (vezi linia
+// „Decizie: ..." din docs/roadmap.md). Preț din docs/pricing.md, pachetul
+// „Business" (~65 €/lună) — acolo unde CRM apare prima dată ca modul de bază.
+const CRM_MODULE_CODE = 'crm';
+const CRM_BUSINESS_PLAN_ID = '00000000-0000-0000-0000-000000000003';
+
 async function main(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
@@ -233,6 +240,156 @@ async function main(): Promise<void> {
     },
   });
 
+  // Catalog modulul CRM ("Clienți" în UI) — vezi docs/crm-spec.md,
+  // docs/pricing.md (pachetul „Business", unde CRM apare prima dată ca
+  // modul de bază).
+  await prisma.module.upsert({
+    where: { code: CRM_MODULE_CODE },
+    update: {},
+    create: {
+      code: CRM_MODULE_CODE,
+      name: 'CRM',
+      billingType: 'flat',
+    },
+  });
+  await prisma.plan.upsert({
+    where: { id: CRM_BUSINESS_PLAN_ID },
+    update: {},
+    create: {
+      id: CRM_BUSINESS_PLAN_ID,
+      moduleCode: CRM_MODULE_CODE,
+      name: 'business',
+      priceCents: 6500, // 65 €/lună, docs/pricing.md
+      currency: 'EUR',
+      billingPeriod: 'monthly',
+    },
+  });
+  // Entitlement + rol — DOAR pentru testare locală, aceeași motivație ca la
+  // invoicing mai sus.
+  await prisma.tenantModule.upsert({
+    where: {
+      tenantId_moduleCode: { tenantId: tenant.id, moduleCode: CRM_MODULE_CODE },
+    },
+    update: { status: 'active', planId: CRM_BUSINESS_PLAN_ID },
+    create: {
+      tenantId: tenant.id,
+      moduleCode: CRM_MODULE_CODE,
+      planId: CRM_BUSINESS_PLAN_ID,
+      status: 'active',
+    },
+  });
+  await prisma.userModuleRole.upsert({
+    where: {
+      tenantId_userId_moduleCode_role: {
+        tenantId: tenant.id,
+        userId: testUser.id,
+        moduleCode: CRM_MODULE_CODE,
+        role: 'crm:admin',
+      },
+    },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      userId: testUser.id,
+      moduleCode: CRM_MODULE_CODE,
+      role: 'crm:admin',
+    },
+  });
+
+  // Date demo CRM — o companie cu echipă/categorii/conexiune, un contact
+  // legat de ea, un deal și o sarcină/notă. Scrise direct prin Prisma (ca
+  // restul acestui script) — CodeSequenceService trăiește în contextul Nest
+  // (nu e disponibil într-un script standalone), deci codurile sunt
+  // calculate aici direct, iar `code_sequences` e adus la zi manual ca
+  // primul cod real creat din UI să continue corect de la CLI-0002 etc.
+  const demoCompany = await prisma.company.upsert({
+    where: { tenantId_companyCode: { tenantId: tenant.id, companyCode: 'CLI-0001' } },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      companyCode: 'CLI-0001',
+      name: 'Tech Solutions SRL',
+      taxId: null,
+      city: 'Cluj-Napoca',
+      country: 'RO',
+      isVatPayer: true,
+      website: 'https://techsolutions.example.ro',
+      email: 'contact@techsolutions.example.ro',
+      description: 'Furnizor de servicii IT pentru IMM-uri.',
+      categories: ['B2B', 'IT'],
+      connectionStrength: 'strong',
+      estimatedRevenueRange: '100K-500K',
+      teamMembers: { create: [{ userId: testUser.id }] },
+    },
+  });
+  const demoContact = await prisma.contact.upsert({
+    where: { tenantId_contactCode: { tenantId: tenant.id, contactCode: 'CTC-0001' } },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      contactCode: 'CTC-0001',
+      name: 'Ana Popescu',
+      email: 'ana.popescu@techsolutions.example.ro',
+      position: 'CEO',
+      companyId: demoCompany.id,
+    },
+  });
+  const demoDeal = await prisma.deal.upsert({
+    where: { tenantId_dealCode: { tenantId: tenant.id, dealCode: 'DEAL-2026-0001' } },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      dealCode: 'DEAL-2026-0001',
+      title: 'Contract mentenanță anuală',
+      contactId: demoContact.id,
+      companyId: demoCompany.id,
+      totalValue: 12000,
+      currency: 'RON',
+      status: 'proposal',
+      priority: 'high',
+      dealDate: new Date('2026-08-15'),
+      expectedCloseDate: new Date('2026-09-30'),
+    },
+  });
+  await prisma.task.create({
+    data: {
+      tenantId: tenant.id,
+      title: 'Trimite ofertă actualizată',
+      priority: 'high',
+      status: 'pending',
+      dueAt: new Date('2026-09-10T10:00:00Z'),
+      dealId: demoDeal.id,
+      assignees: { create: [{ userId: testUser.id }] },
+    },
+  });
+  await prisma.note.create({
+    data: {
+      tenantId: tenant.id,
+      title: 'Discuție inițială',
+      content: 'Clientul e interesat de un contract pe 12 luni, cu SLA 24/7.',
+      companyId: demoCompany.id,
+      isFavorite: true,
+      assignees: { create: [{ userId: testUser.id }] },
+    },
+  });
+  // Aduce la zi contorul, ca primul „+Adaugă" real din UI să continue de la
+  // CLI-0002/CTC-0002/DEAL-2026-0002, nu să coliziune cu datele demo de mai sus.
+  await prisma.codeSequence.upsert({
+    where: { tenantId_entityType: { tenantId: tenant.id, entityType: 'company' } },
+    update: {},
+    create: { tenantId: tenant.id, entityType: 'company', nextValue: 2 },
+  });
+  await prisma.codeSequence.upsert({
+    where: { tenantId_entityType: { tenantId: tenant.id, entityType: 'contact' } },
+    update: {},
+    create: { tenantId: tenant.id, entityType: 'contact', nextValue: 2 },
+  });
+  await prisma.codeSequence.upsert({
+    where: { tenantId_entityType: { tenantId: tenant.id, entityType: 'deal:2026' } },
+    update: {},
+    create: { tenantId: tenant.id, entityType: 'deal:2026', nextValue: 2 },
+  });
+
   for (const tc of TAX_CODES) {
     await prisma.taxCode.upsert({
       where: {
@@ -264,6 +421,9 @@ async function main(): Promise<void> {
   console.log(`  tenantId: ${tenant.id}`);
   console.log(
     `  modul "${INVOICING_MODULE_CODE}" + plan "start": entitlement ACTIV (doar pt. testare locală, vezi comentariul din cod) + rol "invoicing:admin" acordat userului de test.`,
+  );
+  console.log(
+    `  modul "${CRM_MODULE_CODE}" + plan "business": entitlement ACTIV + rol "crm:admin" acordat userului de test — companie/contact/deal/task/notă demo create (CLI-0001/CTC-0001/DEAL-2026-0001).`,
   );
   console.log(
     `  ${TAX_CODES.length} cote TVA seed-uite (3 curente + 3 istoric) — vezi docs/invoicing-spec.md.`,

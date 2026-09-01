@@ -12,7 +12,7 @@ import { CreateInvoiceLineDto } from './create-invoice-line.dto';
 
 /**
  * Notă de credit (storno) — legată explicit de factura originală (calea
- * din URL, /invoices/:id/credit-notes), nu de un customerId separat: merge
+ * din URL, /invoices/:id/credit-notes), nu de un companyId separat: merge
  * mereu către clientul facturii originale (vezi docs/invoicing-spec.md).
  * Liniile sunt date explicit de apelant (`invoicing:approver`), NU
  * oglindite/negate automat din original — permite corecții parțiale

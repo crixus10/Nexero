@@ -118,4 +118,22 @@ describe('AnafService', () => {
     await expect(service.validateCui('5')).rejects.toThrow(BadRequestException);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  describe('normalizeCuiUnverified', () => {
+    // Fallback pentru introducere manuală de CUI când ANAF e indisponibil
+    // (CompaniesService.resolveTaxId) — nu apelează rețeaua deloc.
+    it('normalizează un CUI valid fără să apeleze ANAF', () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy;
+
+      expect(service.normalizeCuiUnverified('RO 12345678')).toBe('12345678');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('respinge un format clar invalid', () => {
+      expect(() => service.normalizeCuiUnverified('abc')).toThrow(
+        BadRequestException,
+      );
+    });
+  });
 });

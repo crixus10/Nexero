@@ -21,6 +21,17 @@ export function SidebarMenu() {
     [pathname],
   );
 
+  // Grupurile de sidebar se filtrează pe `rootPath` (tab-ul de sus activ) —
+  // Layout 11 vendor nu are acest mecanism (un singur MENU_SIDEBAR static),
+  // dar cu 2 module reale (Facturare/Clienți), fără filtrare, sidebar-ul
+  // le-ar amesteca pe amândouă mereu. Fallback: dacă niciun grup nu are
+  // rootPath (sau nu potrivește nimic azi), arată tot — degradare
+  // sigură, nu sidebar gol.
+  const visibleGroups = MENU_SIDEBAR.filter(
+    (item) => !item.rootPath || pathname.startsWith(item.rootPath),
+  );
+  const groups = visibleGroups.length > 0 ? visibleGroups : MENU_SIDEBAR;
+
   return (
     <ScrollArea className="grow h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-4rem)] my-2.5 lg:my-7.5 px-2.5 me-0.5 pe-2">
       <AccordionMenu
@@ -35,7 +46,7 @@ export function SidebarMenu() {
           group: '',
         }}
       >
-        {MENU_SIDEBAR.map((item, index) => {
+        {groups.map((item, index) => {
           return (
             <AccordionMenuGroup key={index}>
               <AccordionMenuLabel>

@@ -33,7 +33,7 @@ portalul valoros ca motor de achiziție.
 
 Identitatea globală nu înseamnă acces global — vezi „Regula de izolare"
 mai jos. Un `portal_user` vede DOAR facturile pentru care are o legătură
-explicit verificată cu un `(tenant_id, customer_id)`, niciodată tot ce
+explicit verificată cu un `(tenant_id, company_id)`, niciodată tot ce
 există pe platformă cu emailul lui.
 
 ## Schema de date
@@ -53,10 +53,10 @@ CREATE TABLE portal_user_links (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   portal_user_id UUID NOT NULL REFERENCES portal_users(id),
   tenant_id      UUID NOT NULL REFERENCES tenants(id),
-  customer_id    UUID NOT NULL REFERENCES customers(id),  -- din invoicing-spec.md
+  company_id     UUID NOT NULL REFERENCES companies(id),  -- din invoicing-spec.md
   verified_at    TIMESTAMPTZ,   -- NULL = invitație netrimisă/neconfirmată încă
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, customer_id)
+  UNIQUE (tenant_id, company_id)
 );
 
 -- Token-uri de autentificare fără parolă (magic link), cu expirare scurtă
@@ -79,9 +79,9 @@ tracking/adopție (aceeași infrastructură de `tenant_modules`/
 ## Flux de notificare (declanșat de aceeași tranziție ca e-Factura)
 
 1. La `invoices.status = issued`: caută `portal_user_links` pentru
-   `(tenant_id, customer_id)` al facturii.
+   `(tenant_id, company_id)` al facturii.
 2. Dacă nu există link: creează unul (`verified_at = NULL`), creează sau
-   reidentifică `portal_users` după email-ul din `customers`, trimite
+   reidentifică `portal_users` după email-ul din `companies`, trimite
    email „ai o factură nouă — confirmă contul" cu magic link.
 3. Dacă există link deja verificat: trimite direct „factură nouă
    disponibilă" cu magic link direct către acea factură.
@@ -109,9 +109,9 @@ la orice altceva în afara relațiilor explicit verificate ale unui portal
 user. Regulă obligatorie: orice query pentru facturile vizibile unui
 portal user pornește **exclusiv** de la `portal_user_links` cu
 `verified_at IS NOT NULL` ale sesiunii curente (rezolvate din
-token-ul de autentificare, niciodată dintr-un `tenant_id`/`customer_id`
+token-ul de autentificare, niciodată dintr-un `tenant_id`/`company_id`
 primit ca parametru de la client). Un endpoint care acceptă `tenant_id`
-sau `customer_id` direct din query/body pentru un portal user e o breșă
+sau `company_id` direct din query/body pentru un portal user e o breșă
 IDOR (un portal user ar putea încerca alt UUID și vedea facturile altcuiva)
 — verificat de `customer-portal-guardian`, severitate BLOCANT.
 

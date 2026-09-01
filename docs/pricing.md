@@ -34,6 +34,16 @@ Prețurile sunt punct de plecare, nu finale — validează cu structura de
 costuri și marja țintă înainte de a le fixa în cod (ex. în `plans` din
 `docs/data-model.md`).
 
+**„Clienți" (UI) ≠ „clienți/furnizori" (Modulul 2).** Tab-ul de sus
+„Clienți" din aplicație e modulul CRM (cod `crm`, `docs/crm-spec.md`) —
+add-on de la pachetul Business în sus, cu companii/contacte/deal-uri/
+sarcini/note. E distinct de „clienți/furnizori" simplu, inclus în
+pachetul Start la Modulul 2 (Stocuri) — un nomenclator minim de
+parteneri, fără CRM. Modulul 2 nu există încă (vezi `docs/roadmap.md`,
+secțiunea „Decizie"); când se construiește, va trebui clarificat dacă
+„clienți/furnizori" de acolo rămâne un nomenclator separat sau reutilizează
+`companies` din `crm` — de decis atunci, nu speculativ acum.
+
 ## Add-on AI (OCR facturi/bonuri) — pe uz, nu în abonamentul plat
 
 Singura excepție de la cele două axe de mai sus, și e intenționată: cost

@@ -1,13 +1,23 @@
 import { apiFetch } from './client';
+import { ApiError } from './client';
 import type {
   AuthenticatedUser,
+  Company,
+  Contact,
+  ConnectionStrength,
   CreateInvoicePayload,
-  Customer,
+  Deal,
+  DealStatus,
   DocumentType,
   Invoice,
   InvoiceSeries,
+  Note,
+  Priority,
   Product,
+  SocialLink,
+  Task,
   TaxType,
+  UserRef,
 } from './types';
 
 export const AuthApi = {
@@ -19,50 +29,171 @@ export const AuthApi = {
   me: () => apiFetch<AuthenticatedUser>('/auth/me'),
 };
 
+export const UsersApi = {
+  // GET /users e restricționat la owner/admin (rol global, vezi
+  // UsersController) — un crm:agent obișnuit primește 403. Pickerele de
+  // echipă/asignare tratează asta ca „nicio opțiune", nu ca eroare de
+  // pagină (vezi CompanyFormDialog/TaskFormDialog din web/src/pages/crm/).
+  list: async (): Promise<UserRef[]> => {
+    try {
+      return await apiFetch<UserRef[]>('/users');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) return [];
+      throw err;
+    }
+  },
+};
+
 // q e trimis ca query param — backend-ul îl folosește pentru o căutare
 // case-insensitive pe nume/cod (vezi *.service.ts findAll).
 function withQuery(path: string, q?: string): string {
   return q ? `${path}?q=${encodeURIComponent(q)}` : path;
 }
 
-export interface CreateCustomerPayload {
-  customerCode: string;
+// ── CRM ("Clienți" în UI) — înlocuiește fostul CustomersApi ─────────────
+
+// address/postalCode/city/website/email/phone/description acceptă `null`
+// explicit (golește câmpul — `@IsOptional()` din backend tratează `null` la
+// fel ca `undefined`, sare peste restul validatorilor) chiar și la create
+// (fără efect practic acolo, dar tipul rămâne unul singur, refolosit și de
+// update). `undefined` înseamnă „neschimbat" la update — JSON.stringify
+// elimină cheia din body. Vezi fix logic-reviewer aplicat inițial pe fosta
+// pagină „Clienți".
+export interface CreateCompanyPayload {
   name: string;
   taxId?: string;
-  address?: string;
-  postalCode?: string;
-  city?: string;
-  country?: string;
-  isVatPayer?: boolean;
-  preferredLanguage?: string;
-}
-
-// address/postalCode/city acceptă `null` explicit (golește câmpul — coloana
-// e nullable, iar `@IsOptional()` din backend tratează `null` la fel ca
-// `undefined`: sare peste restul validatorilor). `undefined` înseamnă
-// „neschimbat" — JSON.stringify elimină cheia din body, deci
-// CustomersService.update nu-l atinge. Fără această distincție, golirea
-// unui câmp din formular era un no-op silențios (fix logic-reviewer).
-export type UpdateCustomerPayload = Omit<
-  CreateCustomerPayload,
-  'customerCode' | 'address' | 'postalCode' | 'city'
-> & {
   address?: string | null;
   postalCode?: string | null;
   city?: string | null;
+  country?: string;
+  isVatPayer?: boolean;
+  preferredLanguage?: string;
+  website?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  description?: string | null;
+  categories?: string[];
+  connectionStrength?: ConnectionStrength;
+  estimatedRevenueRange?: string;
+  teamUserIds?: string[];
+}
+
+export type UpdateCompanyPayload = CreateCompanyPayload;
+
+export const CompaniesApi = {
+  list: (q?: string) => apiFetch<Company[]>(withQuery('/companies', q)),
+  get: (id: string) => apiFetch<Company>(`/companies/${id}`),
+  create: (dto: CreateCompanyPayload) =>
+    apiFetch<Company>('/companies', { method: 'POST', body: JSON.stringify(dto) }),
+  update: (id: string, dto: UpdateCompanyPayload) =>
+    apiFetch<Company>(`/companies/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }),
+  remove: (id: string) => apiFetch<{ ok: true }>(`/companies/${id}`, { method: 'DELETE' }),
 };
 
-export const CustomersApi = {
-  list: (q?: string) => apiFetch<Customer[]>(withQuery('/customers', q)),
-  create: (dto: CreateCustomerPayload) =>
-    apiFetch<Customer>('/customers', { method: 'POST', body: JSON.stringify(dto) }),
-  update: (id: string, dto: UpdateCustomerPayload) =>
-    apiFetch<Customer>(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }),
-  remove: (id: string) => apiFetch<{ ok: true }>(`/customers/${id}`, { method: 'DELETE' }),
+export interface CreateContactPayload {
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  position?: string | null;
+  companyId?: string | null;
+  socialLinks?: SocialLink[];
+}
+
+export type UpdateContactPayload = CreateContactPayload;
+
+export const ContactsApi = {
+  list: (q?: string) => apiFetch<Contact[]>(withQuery('/contacts', q)),
+  get: (id: string) => apiFetch<Contact>(`/contacts/${id}`),
+  create: (dto: CreateContactPayload) =>
+    apiFetch<Contact>('/contacts', { method: 'POST', body: JSON.stringify(dto) }),
+  update: (id: string, dto: UpdateContactPayload) =>
+    apiFetch<Contact>(`/contacts/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }),
+  remove: (id: string) => apiFetch<{ ok: true }>(`/contacts/${id}`, { method: 'DELETE' }),
 };
 
+export interface CreateDealPayload {
+  title: string;
+  contactId?: string | null;
+  companyId?: string | null;
+  totalValue: number;
+  currency?: string;
+  status?: DealStatus;
+  priority?: Priority;
+  dealDate: string;
+  expectedCloseDate?: string | null;
+  discountPercent?: number;
+  paymentMethod?: string | null;
+  invoiceId?: string | null;
+}
+
+export type UpdateDealPayload = Partial<CreateDealPayload>;
+
+export const DealsApi = {
+  list: (q?: string) => apiFetch<Deal[]>(withQuery('/deals', q)),
+  get: (id: string) => apiFetch<Deal>(`/deals/${id}`),
+  create: (dto: CreateDealPayload) =>
+    apiFetch<Deal>('/deals', { method: 'POST', body: JSON.stringify(dto) }),
+  update: (id: string, dto: UpdateDealPayload) =>
+    apiFetch<Deal>(`/deals/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }),
+  remove: (id: string) => apiFetch<{ ok: true }>(`/deals/${id}`, { method: 'DELETE' }),
+};
+
+export interface CreateTaskPayload {
+  title: string;
+  description?: string | null;
+  dueAt?: string | null;
+  priority?: Priority;
+  status?: 'pending' | 'in_progress' | 'done';
+  companyId?: string | null;
+  contactId?: string | null;
+  dealId?: string | null;
+  assigneeUserIds?: string[];
+}
+
+export type UpdateTaskPayload = Partial<CreateTaskPayload>;
+
+export const TasksApi = {
+  list: (q?: string) => apiFetch<Task[]>(withQuery('/tasks', q)),
+  get: (id: string) => apiFetch<Task>(`/tasks/${id}`),
+  create: (dto: CreateTaskPayload) =>
+    apiFetch<Task>('/tasks', { method: 'POST', body: JSON.stringify(dto) }),
+  update: (id: string, dto: UpdateTaskPayload) =>
+    apiFetch<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }),
+  remove: (id: string) => apiFetch<{ ok: true }>(`/tasks/${id}`, { method: 'DELETE' }),
+};
+
+export interface CreateNotePayload {
+  title: string;
+  content?: string | null;
+  category?: string | null;
+  priority?: Priority;
+  status?: 'pending' | 'in_progress' | 'done';
+  dueAt?: string | null;
+  isFavorite?: boolean;
+  companyId?: string | null;
+  contactId?: string | null;
+  dealId?: string | null;
+  assigneeUserIds?: string[];
+}
+
+export type UpdateNotePayload = Partial<CreateNotePayload>;
+
+export const NotesApi = {
+  list: (q?: string) => apiFetch<Note[]>(withQuery('/notes', q)),
+  get: (id: string) => apiFetch<Note>(`/notes/${id}`),
+  create: (dto: CreateNotePayload) =>
+    apiFetch<Note>('/notes', { method: 'POST', body: JSON.stringify(dto) }),
+  update: (id: string, dto: UpdateNotePayload) =>
+    apiFetch<Note>(`/notes/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }),
+  remove: (id: string) => apiFetch<{ ok: true }>(`/notes/${id}`, { method: 'DELETE' }),
+};
+
+// ── Facturare ─────────────────────────────────────────────────────────
+
+// productCode NU apare aici, deliberat — alocat automat de backend
+// (CodeSequenceService), niciodată tastat de utilizator.
 export interface CreateProductPayload {
-  productCode: string;
   description: string;
   unitOfMeasure: string;
   defaultTaxType: TaxType;
@@ -71,8 +202,8 @@ export interface CreateProductPayload {
 }
 
 // unitPrice acceptă `null` explicit (golește prețul — vezi comentariul
-// echivalent din UpdateCustomerPayload despre address/postalCode/city).
-export type UpdateProductPayload = Omit<CreateProductPayload, 'productCode' | 'unitPrice'> & {
+// echivalent din CreateCompanyPayload despre address/postalCode/city).
+export type UpdateProductPayload = Omit<CreateProductPayload, 'unitPrice'> & {
   unitPrice?: number | null;
 };
 

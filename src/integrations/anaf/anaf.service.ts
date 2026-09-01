@@ -51,7 +51,7 @@ export class AnafService {
    * (rețea/5xx/timeout) ca „CUI invalid” — un client
    * cu CUI corect n-ar trebui respins din cauza unei indisponibilități
    * ANAF temporare; aruncă `ServiceUnavailableException`, distinct, ca
-   * apelantul (CustomersService) să nu confunde cele două cazuri.
+   * apelantul (CompaniesService, modulul crm) să nu confunde cele două cazuri.
    */
   async validateCui(rawCui: string): Promise<AnafCuiInfo> {
     const cui = this.normalizeCui(rawCui);
@@ -112,6 +112,27 @@ export class AnafService {
       name: entry.date_generale.denumire,
       address: entry.date_generale.adresa ?? null,
     };
+  }
+
+  /**
+   * Normalizează un CUI la forma stocată intern (cifre pure, fără „RO”),
+   * FĂRĂ să-l verifice contra registrului ANAF — fallback explicit pentru
+   * cazul în care `validateCui` aruncă `ServiceUnavailableException`
+   * (serviciul ANAF picat/indisponibil temporar): cerință directă a
+   * utilizatorului — o cădere ANAF nu trebuie să blocheze introducerea
+   * manuală a unui CUI. Aruncă `BadRequestException` doar pentru format
+   * clar invalid (lungime greșită) — aceeași verificare de bază ca la
+   * validarea online, doar fără apelul de rețea. Apelantul
+   * (`CompaniesService`) rămâne responsabil să distingă cele două erori
+   * (`ServiceUnavailableException` → apelează asta; `BadRequestException`
+   * de la `validateCui` → CUI respins, nu ocolit).
+   */
+  normalizeCuiUnverified(rawCui: string): string {
+    const cui = this.normalizeCui(rawCui);
+    if (!cui) {
+      throw new BadRequestException(`CUI invalid: „${rawCui}”.`);
+    }
+    return cui;
   }
 
   /**

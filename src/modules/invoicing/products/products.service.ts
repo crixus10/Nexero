@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Product } from '@prisma/client';
+import { CodeSequenceService } from '../../../common/code-sequence.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -15,14 +16,24 @@ import { UpdateProductDto } from './dto/update-product.dto';
  */
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly codeSequence: CodeSequenceService,
+  ) {}
 
   async create(tenantId: string, dto: CreateProductDto): Promise<Product> {
+    // Cod auto-generat — cerință explicită, niciodată acceptat din input
+    // client (vezi comentariul din CreateProductDto).
+    const productCode = await this.codeSequence.nextFormatted(
+      tenantId,
+      'product',
+      'PRD',
+    );
     try {
       return await this.prisma.product.create({
         data: {
           tenantId,
-          productCode: dto.productCode,
+          productCode,
           description: dto.description,
           unitOfMeasure: dto.unitOfMeasure,
           defaultTaxType: dto.defaultTaxType,
@@ -33,7 +44,7 @@ export class ProductsService {
         },
       });
     } catch (err) {
-      throw this.translateUniqueConstraint(err, dto.productCode);
+      throw this.translateUniqueConstraint(err, productCode);
     }
   }
 
@@ -68,7 +79,8 @@ export class ProductsService {
     dto: UpdateProductDto,
   ): Promise<Product> {
     // updateMany, nu update — where poate filtra pe tenantId direct
-    // (regula #6). Vezi comentariul echivalent din CustomersService.update.
+    // (regula #6). Vezi comentariul echivalent din CompaniesService.update
+    // (modulul crm).
     const { count } = await this.prisma.product.updateMany({
       where: { id, tenantId },
       data: dto,

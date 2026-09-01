@@ -7,6 +7,7 @@ CLAUDE.md                                    ← memoria permanentă, se încarc
 docs/architecture.md                         ← motivația deciziilor (citit doar la nevoie)
 docs/data-model.md                           ← schema SQL + tiparele de cod (nucleu: auth, entitlements, billing)
 docs/invoicing-spec.md                       ← schema + logica Modulului 1 (Facturare)
+docs/crm-spec.md                             ← schema + logica Modulului 4 (CRM, „Clienți" în UI)
 docs/customer-portal-spec.md                 ← schema + logica Portalului Clienți
 docs/platform-admin-spec.md                  ← schema + logica Panelului Admin Intern
 docs/ai-addon-spec.md                        ← schema + logica add-on-ului AI (OCR)
@@ -19,6 +20,7 @@ docs/deploy.md                               ← runbook provizionare VPS Hetzne
 .claude/agents/logic-reviewer.md             ← erori de logică, breșe de securitate
 .claude/agents/docs-sync.md                  ← sincronizare docs/README/CLAUDE.md cu codul real
 .claude/agents/invoicing-guardian.md         ← agent de domeniu — Modulul 1 (Facturare)
+.claude/agents/crm-guardian.md               ← agent de domeniu — Modulul 4 (CRM, „Clienți" în UI)
 .claude/agents/customer-portal-guardian.md   ← agent de domeniu — Portal Clienți
 .claude/agents/platform-admin-guardian.md    ← agent de domeniu — Panel Admin Intern
 .claude/agents/ai-addon-guardian.md          ← agent de domeniu — add-on AI

@@ -71,12 +71,19 @@ plus istoricele S19, R9, R5).
 
 ## Schema de date (aliniată SAF-T — vezi docs/saft-mapping.md)
 
+**Notă (2026-09-01):** tabelul de mai jos s-a numit inițial `customers`
+(`customer_code`) — redenumit **`companies`** (`company_code`) la mutarea
+nomenclatorului de clienți în Modulul 4 (CRM), fără nicio schimbare de
+câmpuri (migrare RENAME, nu DROP+CREATE — vezi `docs/crm-spec.md`, „De ce
+Company înlocuiește Customer”). CRUD-ul lui stă azi în
+`src/modules/crm/companies/`, nu în `src/modules/invoicing/`.
+
 ```sql
 -- Date master minime — vezi „Dependență cu modulul Stocuri” mai jos
-CREATE TABLE customers (
+CREATE TABLE companies (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id           UUID NOT NULL REFERENCES tenants(id),
-  customer_code       TEXT NOT NULL,        -- CustomerID (SAF-T)
+  company_code        TEXT NOT NULL,        -- CustomerID (SAF-T)
   tax_id              TEXT,                 -- CustomerTaxID: CUI/CNP (SAF-T)
   name                TEXT NOT NULL,        -- CompanyName (SAF-T)
   address             TEXT,
@@ -86,7 +93,10 @@ CREATE TABLE customers (
   is_vat_payer        BOOLEAN NOT NULL DEFAULT true,
   preferred_language  TEXT NOT NULL DEFAULT 'ro',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, customer_code)
+  UNIQUE (tenant_id, company_code)
+  -- + câmpuri CRM (website, email, phone, description, categories,
+  -- connectionStrength, estimatedRevenueRange) — vezi docs/crm-spec.md,
+  -- nu duplicate aici.
 );
 
 CREATE TABLE products (              -- stub minimal, vezi nota de dependență
@@ -141,7 +151,7 @@ CREATE TABLE invoices (
   tax_point_date        DATE NOT NULL,         -- TaxPointDate (SAF-T)
   invoice_type          TEXT NOT NULL CHECK (invoice_type IN
                            ('Normal','CreditNote','DebitNote','DownPayment')),
-  customer_id           UUID NOT NULL REFERENCES customers(id),
+  company_id            UUID NOT NULL REFERENCES companies(id),
   currency              TEXT NOT NULL DEFAULT 'RON',
   exchange_rate         NUMERIC(12,6) NOT NULL DEFAULT 1,  -- curs BNR la data facturii
   status                TEXT NOT NULL CHECK (status IN
@@ -261,7 +271,7 @@ restructurare, mapând direct pe planul de conturi românesc (OMFP
 - `products.revenue_account` — contul de venituri (707/704/701...) e o
   proprietate a **produsului**, independentă de cota TVA aplicată pe el.
 - Clienții nu au nevoie de cont contabil propriu — toate facturile intră pe
-  411 (Clienți) generic, cu analitic pe `customer_code`, deja identificator
+  411 (Clienți) generic, cu analitic pe `company_code`, deja identificator
   stabil.
 
 Nota contabilă pe care Modulul 3 o va genera la `status = issued` rezultă
@@ -269,7 +279,7 @@ direct din datele deja prezente pe factură, fără recalcul:
 
 | Sens | Cont | Sumă |
 |---|---|---|
-| Debit | 411 Clienți (analitic `customer_code`) | `invoice_amount` |
+| Debit | 411 Clienți (analitic `company_code`) | `invoice_amount` |
 | Credit | `products.revenue_account`, grupat | Σ `line_amount` pe cont |
 | Credit | `tax_codes.vat_account_output`, grupat | Σ `tax_amount` pe cont |
 
@@ -286,18 +296,19 @@ pot ajunge desincronizate.
 
 ## Dependență cu modulul Stocuri (#2) — pentru harmonizer
 
-`customers` și `products` de mai sus sunt **stub-uri minime**, suficiente
+`companies` (fost `customers` — redenumit la mutarea în Modulul 4/CRM,
+vezi nota de mai sus) și `products` sunt **stub-uri minime**, suficiente
 cât să funcționeze facturarea de sine stătător. Modulul Stocuri (#2) va
 extinde `products` (stoc, depozite, rețete) și va adăuga `suppliers` — nu
 va crea tabele noi paralele. Orice coloană adăugată acolo trebuie să
-păstreze `product_code`/`customer_code` ca identificator stabil, pentru că
+păstreze `product_code`/`company_code` ca identificator stabil, pentru că
 `invoice_lines`/`invoices` deja le referențiază prin FK. Verificarea acestei
 compatibilități e responsabilitatea `system-orchestrator` la fiecare rulare
 combinată cu modulul 2.
 
-**Aplicat, nu doar documentat** (Fază B.3): `UpdateCustomerDto`/
-`UpdateProductDto` (`src/modules/invoicing/customers/`,
-`src/modules/invoicing/products/`) omit deliberat `customerCode`/
+**Aplicat, nu doar documentat** (Fază B.3): `UpdateCompanyDto`
+(`src/modules/crm/companies/`) și `UpdateProductDto`
+(`src/modules/invoicing/products/`) omit deliberat `companyCode`/
 `productCode` — imposibil de redenumit prin API odată create, aplicat de
 `ValidationPipe` global (`whitelist: true`, `src/main.ts`), nu doar o
 convenție de urmat.
@@ -315,15 +326,18 @@ Un utilizator cu doar `issuer` nu poate și storna propriile facturi — asta
 previne o singură persoană să emită și să anuleze fără control, relevant la
 un audit SAF-T/ANAF.
 
-**Nomenclatoarele modulului** (clienți, produse, serii de facturare) — vezi
-`CustomersController`/`ProductsController`/`InvoiceSeriesController` —
-urmează același RBAC, dar segregat diferit față de facturi: citire —
-oricare din cele 4 roluri (un nomenclator, nu un document fiscal, deci
-`viewer`/`approver` au acces deplin de citire); creare/editare/ștergere
-clienți și produse — doar `issuer`+`admin` (parte din fluxul curent de
-emitere, nu o acțiune de stornare); creare/ștergere serii de numerotare —
+**Nomenclatoarele modulului** (produse, serii de facturare) — vezi
+`ProductsController`/`InvoiceSeriesController` — urmează același RBAC, dar
+segregat diferit față de facturi: citire — oricare din cele 4 roluri (un
+nomenclator, nu un document fiscal, deci `viewer`/`approver` au acces
+deplin de citire); creare/editare/ștergere produse — doar `issuer`+`admin`
+(parte din fluxul curent de emitere, nu o acțiune de stornare);
+creare/ștergere serii de numerotare —
 doar `admin` (o serie configurată greșit se șterge și se recreează, nu se
 editează — vezi `InvoiceSeriesService`, care omite deliberat `update()`).
+Clienții (`CompaniesController`) au ieșit din acest RBAC — trăiesc azi în
+modulul CRM, cu propriile roluri `crm:viewer/agent/admin`, vezi
+`docs/crm-spec.md`.
 
 Aceste roluri se stochează în tabelul comun `user_module_roles`
 (`module_code = 'invoicing'`), NU în coloana globală `users.role` — cele
@@ -336,7 +350,7 @@ două sunt niveluri separate de rol, vezi `docs/data-model.md`, secțiunea
 engleză inclusă de la lansare (piață țintă RO, dar clienți cu parteneri
 străini sunt comuni).
 
-**Documente**: PDF-ul facturii se generează în `customers.preferred_language`;
+**Documente**: PDF-ul facturii se generează în `companies.preferred_language`;
 opțional, un format bilingv (RO + limba clientului pe aceeași pagină) pentru
 clienți din afara României — practică uzuală în facturarea B2B
 intracomunitară.
@@ -355,7 +369,7 @@ factură pe care o va emite un tenant al platformei:
 | Facturi către persoane nerezidente înregistrate în scop de TVA în RO | 1 ianuarie 2026 |
 | Persoane fizice care facturează pe CNP (fără CIF) — nișă: închirieri de camere, drepturi de autor, agricultori regim special | opțional (Legea 88/2026 a anulat obligativitatea anunțată pentru 1 iunie 2026) |
 
-Modulul 1 emite facturi pe firme cu CIF (`customers.tax_id` = CUI), deci
+Modulul 1 emite facturi pe firme cu CIF (`companies.tax_id` = CUI), deci
 intră direct sub obligația B2B/B2C de mai sus — nu sub excepția de nișă pe
 CNP. Pentru un client B2C fără CUI/cod de TVA, la generarea XML se
 folosește placeholder-ul standard `0000000000000` dacă nu există un CNP

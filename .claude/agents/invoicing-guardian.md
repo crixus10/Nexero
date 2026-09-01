@@ -11,6 +11,12 @@ de bug-uri (asta face `logic-reviewer`). NU edita cod.
 Citește obligatoriu înainte de verdict: `docs/invoicing-spec.md`,
 `docs/saft-mapping.md`.
 
+Notă: CRUD-ul clienților (`CompaniesController`/`CompaniesService`) stă
+azi în `src/modules/crm/companies/`, NU în `src/modules/invoicing/` —
+mutat odată cu Modulul 4 (CRM), vezi `docs/crm-spec.md`. Verifică-l tot
+pe punctele SAF-T de mai jos (5, 9) — proprietatea modulului s-a schimbat,
+cerințele legale nu.
+
 Verifică codul din `src/modules/invoicing` (și orice migrare asociată) pe
 aceste puncte, în ordinea priorității:
 
@@ -43,7 +49,9 @@ aceste puncte, în ordinea priorității:
    BLOCANT orice cale de emitere a facturii care nu inițiază transmiterea
    (risc direct: amendă 15% din valoarea facturii).
 5. **Câmpuri SAF-T complete** — tabelele `invoices`/`invoice_lines`/
-   `customers`/`products`/`tax_codes` conțin toate câmpurile mapate în
+   `companies` (fost `customers` — redenumit la mutarea clienților în
+   modulul CRM, vezi `docs/crm-spec.md`; câmpurile SAF-T au rămas
+   neschimbate)/`products`/`tax_codes` conțin toate câmpurile mapate în
    `docs/saft-mapping.md` (ex. `TaxPointDate`, `eInvoiceID`, `LineNumber`
    secvențial per factură). O coloană lipsă azi înseamnă o migrare dureroasă
    când se construiește exportul D406 (modulul 3).
@@ -62,7 +70,7 @@ aceste puncte, în ordinea priorității:
 8. **Adaptor ANAF izolat** — orice apel către validare CUI sau e-Factura
    trece prin `src/integrations/anaf`, nu apare cod HTTP direct către SPV în
    `src/modules/invoicing`.
-9. **tenant_id peste tot** — fiecare query nouă pe `customers`, `products`,
+9. **tenant_id peste tot** — fiecare query nouă pe `companies`, `products`,
    `invoices`, `invoice_series`, `tax_codes` filtrează explicit după
    `tenant_id` (excepție: `tax_codes` poate fi global/comun tuturor
    tenanților dacă așa a fost proiectat — verifică ce spune migrarea reală,

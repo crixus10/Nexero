@@ -9,11 +9,13 @@ import {
 
 const TAX_TYPES = ['Standard', 'Reduced', 'Exempt'] as const;
 
+/**
+ * `productCode` NU apare aici, deliberat — alocat automat prin
+ * `CodeSequenceService` (src/common/code-sequence.service.ts), niciodată
+ * acceptat din input client (cerința „ID din nomenclatoare generate
+ * automat").
+ */
 export class CreateProductDto {
-  @IsString()
-  @Length(1, 64)
-  productCode!: string;
-
   @IsString()
   @Length(1, 500)
   description!: string;

@@ -15,6 +15,14 @@ aici (adaugă o linie „Decizie: ...” sub tabel).
 | 4 | CRM simplu | Cerere organică de la clienți care vor gestiune vânzări/lead-uri | upsell segment Business |
 | 5+ | HR/salarizare, producție, POS, integrări bancare | Doar după cerere confirmată de clienți reali, nu speculativ | add-on Enterprise |
 
+**Decizie:** Modulul 4 (CRM) a fost construit înaintea Modulelor 2-3
+(Stocuri, Contabilitate+SAF-T), la cererea explicită a utilizatorului
+(2026-09-01) — interfață identică cu demo-ul Metronic CRM, etichetată
+„Clienți" în UI, înlocuind fostul nomenclator simplu „Clienți" din
+Facturare (`Customer`→`Company`, vezi `docs/crm-spec.md`). Modulele 2-3
+rămân neconstruite — de reluat în ordinea normală când apare cererea
+reală, nu retroactiv doar ca să respecte ordinea tabelului.
+
 ## Structura de date — sursă de adevăr: schema SAF-T
 
 Documentele oficiale ANAF pentru declarația SAF-T (D406) sunt în
@@ -65,7 +73,9 @@ instant unde s-a rămas fără să exploreze tot codul.)_
     [x] Fază A — schema (`prisma/migrations/20260827150000_add_invoicing_schema`
     + `20260831163611_invoicing_schema_hardening`) + seed cote TVA;
     [x] Fază B — CRUD clienți (validare CUI prin `src/integrations/anaf`) +
-    CRUD produse (`src/modules/invoicing/customers/`, `.../products/`);
+    CRUD produse (`.../products/`) — clienții au fost mutați ulterior în
+    `src/modules/crm/companies/` (Modulul 4, `Customer`→`Company`, vezi
+    mai jos și `docs/crm-spec.md`);
     [x] Fază C — motorul de facturare (`src/modules/invoicing/invoices/`,
     `.../invoice-series/`): numerotare atomică pe serie, creare factură
     draft + linii, rezolvare cotă TVA pe linie (automat din categoria
@@ -87,5 +97,11 @@ instant unde s-a rămas fără să exploreze tot codul.)_
 - [ ] Panel Admin Intern — vizibil doar Mittani Solutions, plan/încasări/consum per client + agregate
 - [ ] Modulul 2 — Stocuri + clienți/furnizori
 - [ ] Modulul 3 — Contabilitate primară + SAF-T
-- [ ] Modulul 4 — CRM simplu
+- [x] Modulul 4 — CRM ("Clienți" în UI) — construit înaintea Modulelor
+  2-3, vezi „Decizie" de mai sus + `docs/crm-spec.md`: `companies`
+  (fost `customers`)/`contacts`/`deals`/`tasks`/`notes`
+  (`src/modules/crm/`), coduri auto-generate (`CodeSequenceService`,
+  nucleu), RBAC `crm:viewer/agent/admin`, dashboard cu agregări reale,
+  `Deal.invoiceId` legat de facturi reale. Rămas: rapoarte/export CRM,
+  pipeline drag-and-drop — nespecificat încă.
 - [ ] Modulul 5+ — (neînceput, în așteptarea cererii confirmate)

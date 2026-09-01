@@ -41,7 +41,7 @@ export class InvoiceSeriesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query('q') q?: string | string[],
   ) {
-    // Vezi comentariul echivalent din CustomersController — gardă
+    // Vezi comentariul echivalent din CompaniesController (modulul crm) — gardă
     // defensivă contra `?q[]=a&q[]=b` (array), pe care Prisma `contains`
     // nu-l acceptă.
     return this.series.findAll(user.tenantId, Array.isArray(q) ? undefined : q);

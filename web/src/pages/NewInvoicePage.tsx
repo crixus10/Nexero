@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { CustomersApi, InvoiceSeriesApi, InvoicesApi, ProductsApi } from '../api';
+import { CompaniesApi, InvoiceSeriesApi, InvoicesApi, ProductsApi } from '../api';
 import { ApiError } from '../api/client';
 import type {
+  Company,
   CreateInvoiceLinePayload,
-  Customer,
   Invoice,
   InvoiceSeries,
   Product,
@@ -53,13 +53,13 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function NewInvoicePage() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [series, setSeries] = useState<InvoiceSeries[]>([]);
   const [loadingLists, setLoadingLists] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
-  const [customerId, setCustomerId] = useState('');
+  const [companyId, setCompanyId] = useState('');
   const [seriesCode, setSeriesCode] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(today());
   const [lines, setLines] = useState<LineDraft[]>([emptyLine()]);
@@ -75,14 +75,14 @@ export function NewInvoicePage() {
     setListError(null);
     try {
       const [c, p, s] = await Promise.all([
-        CustomersApi.list(),
+        CompaniesApi.list(),
         ProductsApi.list(),
         InvoiceSeriesApi.list(),
       ]);
-      setCustomers(c);
+      setCompanies(c);
       setProducts(p);
       setSeries(s);
-      setCustomerId((prev) => prev || c[0]?.id || '');
+      setCompanyId((prev) => prev || c[0]?.id || '');
       setSeriesCode((prev) => prev || s[0]?.seriesCode || '');
     } catch (err) {
       setListError(
@@ -128,12 +128,12 @@ export function NewInvoicePage() {
     try {
       const payload: {
         seriesCode: string;
-        customerId: string;
+        companyId: string;
         invoiceDate: string;
         lines: CreateInvoiceLinePayload[];
       } = {
         seriesCode,
-        customerId,
+        companyId,
         invoiceDate,
         lines: lines.map((l) => ({
           productId: l.productId || undefined,
@@ -263,13 +263,13 @@ export function NewInvoicePage() {
 
       {!loadingLists && !listError && (
         <form onSubmit={handleSubmit} className="space-y-6">
-          <CustomerPicker
-            customers={customers}
-            customerId={customerId}
-            onChange={setCustomerId}
+          <CompanyPicker
+            companies={companies}
+            companyId={companyId}
+            onChange={setCompanyId}
             onCreated={(c) => {
-              setCustomers((prev) => [...prev, c]);
-              setCustomerId(c.id);
+              setCompanies((prev) => [...prev, c]);
+              setCompanyId(c.id);
             }}
           />
 
@@ -314,7 +314,7 @@ export function NewInvoicePage() {
           <Button
             type="submit"
             variant="primary"
-            disabled={submitting || !customerId || !seriesCode}
+            disabled={submitting || !companyId || !seriesCode}
           >
             {submitting ? 'Se creează…' : 'Creează factura (draft)'}
           </Button>
@@ -324,19 +324,18 @@ export function NewInvoicePage() {
   );
 }
 
-function CustomerPicker({
-  customers,
-  customerId,
+function CompanyPicker({
+  companies,
+  companyId,
   onChange,
   onCreated,
 }: {
-  customers: Customer[];
-  customerId: string;
+  companies: Company[];
+  companyId: string;
   onChange: (id: string) => void;
-  onCreated: (c: Customer) => void;
+  onCreated: (c: Company) => void;
 }) {
-  const [showNew, setShowNew] = useState(customers.length === 0);
-  const [customerCode, setCustomerCode] = useState('');
+  const [showNew, setShowNew] = useState(companies.length === 0);
   const [name, setName] = useState('');
   const [taxId, setTaxId] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -347,14 +346,12 @@ function CustomerPicker({
     setError(null);
     setSaving(true);
     try {
-      const c = await CustomersApi.create({
-        customerCode,
-        name,
-        taxId: taxId || undefined,
-      });
+      // Fără cod de client în formular — companyCode se alocă automat
+      // (CodeSequenceService, vezi CompaniesService.create), niciodată
+      // tastat de utilizator.
+      const c = await CompaniesApi.create({ name, taxId: taxId || undefined });
       onCreated(c);
       setShowNew(false);
-      setCustomerCode('');
       setName('');
       setTaxId('');
     } catch (err) {
@@ -370,14 +367,14 @@ function CustomerPicker({
         <Label className="text-sm font-medium text-foreground">Client</Label>
         {!showNew && (
           <div className="flex items-center gap-2">
-            <Select value={customerId} onValueChange={onChange}>
+            <Select value={companyId} onValueChange={onChange}>
               <SelectTrigger className="flex-1">
                 <SelectValue placeholder="Alege un client" />
               </SelectTrigger>
               <SelectContent>
-                {customers.map((c) => (
+                {companies.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.customerCode} — {c.name}
+                    {c.companyCode} — {c.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -389,21 +386,12 @@ function CustomerPicker({
         )}
         {showNew && (
           <div className="space-y-2">
-            <div className="grid grid-cols-3 gap-2">
-              <Input
-                placeholder="Cod (ex: CL-001)"
-                required
-                value={customerCode}
-                onChange={(e) => setCustomerCode(e.target.value)}
-              />
-              <Input
-                placeholder="Nume firmă/persoană"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="col-span-2"
-              />
-            </div>
+            <Input
+              placeholder="Nume firmă/persoană"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
             <Input
               placeholder="CUI (opțional — validat prin ANAF dacă e dat)"
               value={taxId}
@@ -414,7 +402,7 @@ function CustomerPicker({
               <Button type="button" variant="primary" size="sm" onClick={handleCreate} disabled={saving}>
                 {saving ? 'Se salvează…' : 'Salvează clientul'}
               </Button>
-              {customers.length > 0 && (
+              {companies.length > 0 && (
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowNew(false)}>
                   Anulează
                 </Button>
@@ -511,7 +499,6 @@ const TAX_TYPES: TaxType[] = ['Standard', 'Reduced', 'Exempt'];
 
 function QuickCreateProduct({ onCreated }: { onCreated: (p: Product) => void }) {
   const [open, setOpen] = useState(false);
-  const [productCode, setProductCode] = useState('');
   const [description, setDescription] = useState('');
   const [unitOfMeasure, setUnitOfMeasure] = useState('buc');
   const [defaultTaxType, setDefaultTaxType] = useState<TaxType>('Standard');
@@ -526,7 +513,6 @@ function QuickCreateProduct({ onCreated }: { onCreated: (p: Product) => void }) 
     setSaving(true);
     try {
       const p = await ProductsApi.create({
-        productCode,
         description,
         unitOfMeasure,
         defaultTaxType,
@@ -535,7 +521,6 @@ function QuickCreateProduct({ onCreated }: { onCreated: (p: Product) => void }) 
       });
       onCreated(p);
       setOpen(false);
-      setProductCode('');
       setDescription('');
     } catch (err) {
       setError(errorMessage(err, 'Eroare la crearea produsului.'));
@@ -557,16 +542,11 @@ function QuickCreateProduct({ onCreated }: { onCreated: (p: Product) => void }) 
       <CardContent className="p-3 space-y-2">
         <div className="grid grid-cols-2 gap-2">
           <Input
-            placeholder="Cod produs"
-            required
-            value={productCode}
-            onChange={(e) => setProductCode(e.target.value)}
-          />
-          <Input
             placeholder="Descriere"
             required
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            className="col-span-2"
           />
           <Input
             placeholder="U.M. (buc, ora, kg...)"

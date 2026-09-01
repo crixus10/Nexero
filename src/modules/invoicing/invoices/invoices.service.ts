@@ -20,7 +20,7 @@ interface DraftInvoiceOptions {
   userId: string;
   seriesCode: string;
   invoiceType: 'Normal' | 'CreditNote';
-  customerId: string;
+  companyId: string;
   invoiceDate: Date;
   currency?: string;
   exchangeRate?: number;
@@ -51,11 +51,11 @@ export class InvoicesService {
     userId: string,
     dto: CreateInvoiceDto,
   ): Promise<InvoiceWithLines> {
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: dto.customerId, tenantId },
+    const company = await this.prisma.company.findFirst({
+      where: { id: dto.companyId, tenantId },
     });
-    if (!customer) {
-      throw new NotFoundException(`Clientul „${dto.customerId}” nu există.`);
+    if (!company) {
+      throw new NotFoundException(`Clientul „${dto.companyId}” nu există.`);
     }
 
     return this.createDraftInvoice({
@@ -63,7 +63,7 @@ export class InvoicesService {
       userId,
       seriesCode: dto.seriesCode,
       invoiceType: 'Normal',
-      customerId: customer.id,
+      companyId: company.id,
       invoiceDate: this.parseInvoiceDate(dto.invoiceDate),
       currency: dto.currency,
       exchangeRate: dto.exchangeRate,
@@ -96,7 +96,7 @@ export class InvoicesService {
       userId,
       seriesCode: dto.seriesCode,
       invoiceType: 'CreditNote',
-      customerId: original.customerId,
+      companyId: original.companyId,
       invoiceDate: dto.invoiceDate
         ? this.parseInvoiceDate(dto.invoiceDate)
         : new Date(),
@@ -169,7 +169,7 @@ export class InvoicesService {
     return this.prisma.$transaction(async (tx) => {
       // updateMany (nu update) — where poate filtra pe tenantId direct
       // (regula #6), spre deosebire de update(), limitat la un where unic
-      // pe PK. Aceeași convenție ca în CustomersService/ProductsService —
+      // pe PK. Aceeași convenție ca în CompaniesService/ProductsService —
       // fix logic-reviewer: id-ul e deja verificat prin findOne(tenantId,
       // ...) mai sus, deci neexploatabil azi, dar explicit e mai sigur
       // decât implicit dacă vreodată codul din jur se refactorizează.
@@ -298,7 +298,7 @@ export class InvoicesService {
           // pentru o extensie ulterioară a DTO-ului, nespecificată încă).
           taxPointDate: opts.invoiceDate,
           invoiceType: opts.invoiceType,
-          customerId: opts.customerId,
+          companyId: opts.companyId,
           currency: opts.currency ?? 'RON',
           exchangeRate: opts.exchangeRate ?? 1,
           status: 'draft',

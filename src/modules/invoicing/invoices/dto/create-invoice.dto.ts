@@ -20,7 +20,7 @@ export class CreateInvoiceDto {
   seriesCode!: string;
 
   @IsUUID()
-  customerId!: string;
+  companyId!: string;
 
   /** ISO 8601 (ex. '2026-08-31') — validată contra tax_codes la această dată. */
   @IsDateString()

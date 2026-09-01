@@ -1,4 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import type { CodeSequenceService } from '../../../common/code-sequence.service';
 import type { PrismaService } from '../../../prisma/prisma.service';
 import type { CreateProductDto } from './dto/create-product.dto';
 import { ProductsService } from './products.service';
@@ -14,6 +15,7 @@ describe('ProductsService', () => {
       deleteMany: jest.Mock;
     };
   };
+  let codeSequence: { nextFormatted: jest.Mock };
   let service: ProductsService;
 
   beforeEach(() => {
@@ -26,14 +28,14 @@ describe('ProductsService', () => {
         deleteMany: jest.fn(),
       },
     };
-    service = new ProductsService(prisma as unknown as PrismaService);
+    codeSequence = { nextFormatted: jest.fn().mockResolvedValue('PRD-0001') };
+    service = new ProductsService(
+      prisma as unknown as PrismaService,
+      codeSequence as unknown as CodeSequenceService,
+    );
   });
 
-  it('scrie revenueAccount exact cum e dat, fără fallback silențios', async () => {
-    // revenueAccount e OBLIGATORIU în CreateProductDto (fix invoicing-
-    // guardian: un fallback silențios pe '707' clasifica greșit orice
-    // produs-serviciu) — testăm că serviciul nu-l suprascrie, nu că are
-    // un default.
+  it('alocă automat productCode prin CodeSequenceService, niciodată din input', async () => {
     let createData: Record<string, unknown> | undefined;
     prisma.product.create.mockImplementation(
       (args: { data: Record<string, unknown> }) => {
@@ -43,7 +45,6 @@ describe('ProductsService', () => {
     );
 
     const dto: CreateProductDto = {
-      productCode: 'PR-1',
       description: 'Produs test',
       unitOfMeasure: 'buc',
       defaultTaxType: 'Standard',
@@ -51,14 +52,22 @@ describe('ProductsService', () => {
     };
     await service.create(tenantId, dto);
 
-    expect(createData).toMatchObject({ tenantId, revenueAccount: '704' });
+    expect(codeSequence.nextFormatted).toHaveBeenCalledWith(
+      tenantId,
+      'product',
+      'PRD',
+    );
+    expect(createData).toMatchObject({
+      tenantId,
+      productCode: 'PRD-0001',
+      revenueAccount: '704',
+    });
   });
 
   it('traduce coliziunea de productCode într-un ConflictException', async () => {
     prisma.product.create.mockRejectedValue({ code: 'P2002' });
 
     const dto: CreateProductDto = {
-      productCode: 'PR-1',
       description: 'Produs test',
       unitOfMeasure: 'buc',
       defaultTaxType: 'Standard',

@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { CommonModule } from './common/common.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
+import { CrmModule } from './modules/crm/crm.module';
 import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -17,12 +19,14 @@ import { UsersModule } from './users/users.module';
   // global-role.guard.ts, module-role.guard.ts.
   imports: [
     PrismaModule,
+    CommonModule,
     AuthModule,
     EntitlementsModule,
     RbacModule,
     UsersModule,
     PaymentsModule,
     InvoicingModule,
+    CrmModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -4,7 +4,7 @@ React SPA per `CLAUDE.md` (stack fixat) — consumă exclusiv API-ul din `/`
 (NestJS). Regula #1 din `CLAUDE.md` rămâne validă aici: nicio logică de
 business în frontend, doar apeluri către API și afișare.
 
-## Stare: Metronic 9 integrat (Layout 11) + Facturare + Nomenclatoare
+## Stare: Metronic 9 integrat (Layout 11) + Facturare + CRM ("Clienți")
 
 `CLAUDE.md` fixează UI kit-ul ca **Metronic 9** (React, Tailwind v4/KTUI,
 licență Regular cumpărată deja — **doar pentru dezvoltare**; upgrade la
@@ -15,21 +15,26 @@ livrate ca parte a pachetului Metronic React) stau în `src/components/ui/`.
 Sursa vendor originală (ThemeForest, doar pentru referință/dezvoltare, NU
 în git — vezi `.gitignore`) e la rădăcina repo-ului, folder soră cu `web/`.
 
-Ce există acum, complet funcțional contra API-ului real:
-- Autentificare (`LoginPage`) + rutare protejată (`RequireAuth`).
-- Facturare: listă facturi, factură nouă (client/serie/linii → draft →
-  emitere), temă dark/light, meniu lateral pe module.
-- **Nomenclatoare** (grup separat în sidebar): Clienți, Produse, Serii de
-  facturare — listă cu căutare server-side (`?q=`), paginare client-side,
-  formular de adăugare/editare (dialog), ștergere cu confirmare (traduce
-  eroarea de FK 409 din backend într-un mesaj prietenos, nu generic).
-  Seriile de facturare nu au editare — deliberat, vezi
-  `InvoiceSeriesService` (backend): editarea ar rupe garanția „fără
-  goluri" a numerotării.
+Doi tab-uri de sus, fiecare cu sidebar propriu (filtrat prin `rootPath`,
+vezi `src/config/nav.config.tsx` + `src/components/layout/components/
+sidebar-menu.tsx` — Layout 11 vendor nu are acest mecanism, are un singur
+sidebar static):
 
-Ce lipsește încă, speculativ: Stocuri/CRM (fazele următoare din
-`docs/roadmap.md`) nu au pagini — nu adăuga tab-uri de sidebar pentru ele
-înainte să existe rute reale în backend.
+- **Facturare** — listă facturi, factură nouă (client/serie/linii → draft
+  → emitere), Nomenclatoare (Produse, Serii de facturare — Serii nu au
+  editare, deliberat: ar rupe garanția „fără goluri" a numerotării, vezi
+  `InvoiceSeriesService` backend).
+- **Clienți** (modulul CRM, `docs/crm-spec.md`) — Dashboard (stat carduri
+  + grafic pipeline lunar + Tasks Overview, date reale, nu fabricate),
+  Contacte (tab-uri Leads/Follow-ups/Pipeline), Companii (înlocuiește
+  fostul nomenclator simplu „Clienți" din Facturare — `Customer`→
+  `Company`, cod fiscal vizibil, cod auto-generat), profil individual de
+  companie (`/crm/companies/:id`, tab-uri Overview/Note/Sarcini/Echipă),
+  Deal-uri (tab-uri Active/Closed/Upcoming, layout card, legate opțional
+  de o factură reală din Facturare), Sarcini, Note.
+
+Coduri auto-generate peste tot în nomenclatoare (Clienți/Produse/Contacte/
+Deal-uri) — niciun formular nu mai are câmp de cod tastat manual.
 
 ## Rulare locală
 
@@ -47,10 +52,11 @@ rădăcina repo) trebuie să ruleze pe `:3000` (sau orice pui în
 
 **Cont de test** (din `prisma/seed.ts`, rulează `npx prisma db seed` o
 dată dacă n-ai făcut-o): `test@nexero.local` / `parola-test-123` — are deja
-un entitlement activ pe modulul `invoicing` și rolul `invoicing:admin`,
-DOAR pentru testare locală (vezi comentariul din `seed.ts` — activarea
-reală de producție rămâne exclusiv din webhook-ul de plată, regula #4 din
-`CLAUDE.md`).
+entitlement activ pe modulele `invoicing` (rol `invoicing:admin`) și `crm`
+(rol `crm:admin`), DOAR pentru testare locală (vezi comentariul din
+`seed.ts` — activarea reală de producție rămâne exclusiv din webhook-ul
+de plată, regula #4 din `CLAUDE.md`). Seed-ul include și date demo CRM
+(o companie, un contact, un deal, o sarcină, o notă).
 
 ## Structură
 
@@ -58,6 +64,14 @@ reală de producție rămâne exclusiv din webhook-ul de plată, regula #4 din
 src/
   api/         apeluri tipate către API (client.ts = fetch + JWT + erori)
   auth/        AuthContext (token în localStorage) + RequireAuth (route guard)
-  components/  Layout comun (navigare + logout)
-  pages/       LoginPage, InvoicesPage (listă), NewInvoicePage (fluxul de test)
+  config/      nav.config.tsx (meniu header + sidebar, per modul), types.ts
+  components/
+    layout/    Layout 11 adaptat (header cu tab-uri, sidebar filtrat pe rootPath)
+    ui/        primitive shadcn/Radix (Metronic React), reutilizate de toate paginile
+    *.tsx      componente comune între pagini (list-pagination, row-actions,
+               delete-confirm-dialog, user-multi-select, use-list-page hook)
+  pages/
+    LoginPage, InvoicesPage, NewInvoicePage, ProductsPage, InvoiceSeriesPage
+    crm/       CompaniesPage, CompanyDetailPage, ContactsPage, DealsPage,
+               TasksPage, NotesPage, CrmDashboardPage
 ```

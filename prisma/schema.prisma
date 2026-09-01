@@ -28,10 +28,15 @@ model Tenant {
   usageEvents     UsageEvent[]
   users           User[]
   userModuleRoles UserModuleRole[]
-  customers       Customer[]
+  companies       Company[]
   products        Product[]
   invoiceSeries   InvoiceSeries[]
   invoices        Invoice[]
+  contacts        Contact[]
+  deals           Deal[]
+  tasks           Task[]
+  notes           Note[]
+  codeSequences   CodeSequence[]
 
   @@map("tenants")
 }
@@ -53,7 +58,10 @@ model User {
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  moduleRoles UserModuleRole[]
+  moduleRoles            UserModuleRole[]
+  taskAssignments        TaskAssignee[]
+  noteAssignments        NoteAssignee[]
+  companyTeamMemberships CompanyTeamMember[]
 
   @@index([tenantId])
   @@map("users")
@@ -87,10 +95,10 @@ model UserModuleRole {
 
 /// Catalogul de module disponibile pe platformă ('invoicing', 'inventory', ...).
 model Module {
-  code         String    @id
-  name         String
-  billingType  String    @map("billing_type") // CHECK: 'flat' | 'metered' | 'seat' — vezi migrarea SQL
-  releasedAt   DateTime? @map("released_at") @db.Date
+  code        String    @id
+  name        String
+  billingType String    @map("billing_type") // CHECK: 'flat' | 'metered' | 'seat' — vezi migrarea SQL
+  releasedAt  DateTime? @map("released_at") @db.Date
 
   plans           Plan[]
   tenantModules   TenantModule[]
@@ -102,14 +110,14 @@ model Module {
 
 /// Planurile de preț pentru fiecare modul.
 model Plan {
-  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  moduleCode     String  @map("module_code")
-  module         Module  @relation(fields: [moduleCode], references: [code])
-  name           String
-  priceCents     Int     @map("price_cents")
-  currency       String  @default("EUR")
-  includedQuota  Int?    @map("included_quota")
-  billingPeriod  String  @default("monthly") @map("billing_period")
+  id            String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  moduleCode    String @map("module_code")
+  module        Module @relation(fields: [moduleCode], references: [code])
+  name          String
+  priceCents    Int    @map("price_cents")
+  currency      String @default("EUR")
+  includedQuota Int?   @map("included_quota")
+  billingPeriod String @default("monthly") @map("billing_period")
 
   tenantModules TenantModule[]
 
@@ -128,7 +136,7 @@ model TenantModule {
   module               Module    @relation(fields: [moduleCode], references: [code])
   planId               String    @map("plan_id") @db.Uuid
   plan                 Plan      @relation(fields: [planId], references: [id])
-  status               String    // CHECK: 'trial' | 'active' | 'past_due' | 'canceled'
+  status               String // CHECK: 'trial' | 'active' | 'past_due' | 'canceled'
   trialEndsAt          DateTime? @map("trial_ends_at") @db.Timestamptz(6)
   currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz(6)
   stripeSubscriptionId String?   @map("stripe_subscription_id")
@@ -172,35 +180,30 @@ model UsageEvent {
   @@map("usage_events")
 }
 
+/// Contor secvențial per tenant + tip de entitate, pentru coduri
+/// auto-generate (CLI-0001, PRD-0001, CTC-0001, DEAL-2026-0001...) —
+/// mecanism de NUCLEU, reutilizabil de orice modul (nu specific facturării
+/// sau CRM), vezi docs/data-model.md, secțiunea „Coduri auto-generate".
+/// Incrementare EXCLUSIV atomică într-un `$transaction` (același tipar deja
+/// verificat la `InvoiceSeries.nextNumber`, `InvoicesService.create`) —
+/// niciodată `MAX(cod)+1` (cursă la concurență, două creări simultane ar
+/// putea aloca același cod).
+model CodeSequence {
+  tenantId   String @map("tenant_id") @db.Uuid
+  tenant     Tenant @relation(fields: [tenantId], references: [id])
+  entityType String @map("entity_type") // 'company' | 'product' | 'contact' | 'deal' | ...
+  nextValue  Int    @default(1) @map("next_value")
+
+  @@id([tenantId, entityType])
+  @@map("code_sequences")
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Modulul 1 — Facturare. Schema completă + motivația fiecărui câmp:
 // docs/invoicing-spec.md. Mapare SAF-T oficială: docs/saft-mapping.md.
 // Regulă: nu edita coloane retroactiv pe un rând deja emis (status >=
 // issued) — orice corecție e o notă de credit nouă (CLAUDE.md).
 // ─────────────────────────────────────────────────────────────────────────
-
-/// Clienți emitenți de facturi — CustomerID/CompanyName (SAF-T).
-model Customer {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  tenant            Tenant   @relation(fields: [tenantId], references: [id])
-  customerCode      String   @map("customer_code")
-  taxId             String?  @map("tax_id") // CustomerTaxID (SAF-T) — CUI/CNP
-  name              String
-  address           String?
-  postalCode        String?  @map("postal_code")
-  city              String?
-  country           String   @default("RO")
-  isVatPayer        Boolean  @default(true) @map("is_vat_payer")
-  preferredLanguage String   @default("ro") @map("preferred_language")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  invoices Invoice[]
-
-  @@unique([tenantId, customerCode])
-  @@index([tenantId])
-  @@map("customers")
-}
 
 /// Produse/servicii — ProductCode/ProductDescription (SAF-T). `defaultTaxType`
 /// e categorie (Standard/Reduced/Exempt), nu o cotă înghețată — rata efectivă
@@ -222,6 +225,198 @@ model Product {
   @@unique([tenantId, productCode])
   @@index([tenantId])
   @@map("products")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Modulul 4 — CRM ("Clienți" în UI). Schema completă: docs/crm-spec.md.
+// `Company` înlocuiește fostul `Customer` (redenumire, nu duplicare — o
+// singură sursă de adevăr pentru cine se facturează, vezi docs/crm-spec.md,
+// „De ce Company înlocuiește Customer") — câmpurile SAF-T (taxId/CUI,
+// address...) rămân neschimbate, doar extinse cu atributele CRM din demo.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Companii client — CustomerID/CompanyName (SAF-T) + înregistrare CRM.
+model Company {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  tenant                Tenant   @relation(fields: [tenantId], references: [id])
+  companyCode           String   @map("company_code") // auto-generat (CodeSequence) — niciodată din input client
+  taxId                 String?  @map("tax_id") // CustomerTaxID (SAF-T) — CUI/CNP
+  name                  String
+  address               String?
+  postalCode            String?  @map("postal_code")
+  city                  String?
+  country               String   @default("RO")
+  isVatPayer            Boolean  @default(true) @map("is_vat_payer")
+  preferredLanguage     String   @default("ro") @map("preferred_language")
+  website               String?
+  email                 String?
+  phone                 String?
+  description           String?
+  categories            String[] @default([])
+  connectionStrength    String?  @map("connection_strength") // CHECK: very_weak|weak|medium|strong|very_strong
+  estimatedRevenueRange String?  @map("estimated_revenue_range") // bucket liber, ex. '0-100K'
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoices    Invoice[]
+  contacts    Contact[]
+  deals       Deal[]
+  tasks       Task[]
+  notes       Note[]
+  teamMembers CompanyTeamMember[]
+
+  @@unique([tenantId, companyCode])
+  @@index([tenantId])
+  @@map("companies")
+}
+
+/// Persoană de contact la o companie, sau independentă (lead fără companie
+/// asignată încă — vezi tab-ul „Leads" din Contacts, docs/crm-spec.md).
+model Contact {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  contactCode String   @map("contact_code") // auto-generat
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  position    String?
+  companyId   String?  @map("company_id") @db.Uuid
+  company     Company? @relation(fields: [companyId], references: [id])
+  // [{ platform, url }] — doar afișaj (Social Links din demo), niciodată
+  // filtrat/interogat, de-asta Json și nu un tabel join.
+  socialLinks Json?    @map("social_links")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  deals Deal[]
+  tasks Task[]
+  notes Note[]
+
+  @@unique([tenantId, contactCode])
+  @@index([tenantId])
+  @@index([companyId])
+  @@map("contacts")
+}
+
+/// Oportunitate de vânzare — legată opțional de o FACTURĂ REALĂ (nu un
+/// string decorativ ca în demo-ul sursă), sinergia cerută explicit cu
+/// modulul de facturare.
+model Deal {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  dealCode          String    @map("deal_code") // auto-generat, format DEAL-{an}-{secvență}
+  title             String
+  contactId         String?   @map("contact_id") @db.Uuid
+  contact           Contact?  @relation(fields: [contactId], references: [id])
+  companyId         String?   @map("company_id") @db.Uuid
+  company           Company?  @relation(fields: [companyId], references: [id])
+  totalValue        Decimal   @map("total_value") @db.Decimal(14, 2)
+  currency          String    @default("RON")
+  status            String    @default("proposal") // CHECK: proposal|negotiation|closed_won|closed_lost
+  priority          String    @default("medium") // CHECK: low|medium|high
+  dealDate          DateTime  @map("deal_date") @db.Date
+  expectedCloseDate DateTime? @map("expected_close_date") @db.Date
+  discountPercent   Decimal?  @map("discount_percent") @db.Decimal(5, 2)
+  paymentMethod     String?   @map("payment_method")
+  invoiceId         String?   @map("invoice_id") @db.Uuid
+  invoice           Invoice?  @relation(fields: [invoiceId], references: [id])
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tasks Task[]
+  notes Note[]
+
+  @@unique([tenantId, dealCode])
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([contactId])
+  @@map("deals")
+}
+
+/// Sarcină — asignabilă la useri reali ai firmei (nu avatare fictive),
+/// legată opțional la CEL MULT o singură înregistrare CRM (company/contact/
+/// deal) sau independentă.
+model Task {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  title       String
+  description String?
+  dueAt       DateTime? @map("due_at") @db.Timestamptz(6)
+  priority    String    @default("medium") // CHECK: low|medium|high
+  status      String    @default("pending") // CHECK: pending|in_progress|done
+  companyId   String?   @map("company_id") @db.Uuid
+  company     Company?  @relation(fields: [companyId], references: [id])
+  contactId   String?   @map("contact_id") @db.Uuid
+  contact     Contact?  @relation(fields: [contactId], references: [id])
+  dealId      String?   @map("deal_id") @db.Uuid
+  deal        Deal?     @relation(fields: [dealId], references: [id])
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  assignees TaskAssignee[]
+
+  @@index([tenantId])
+  @@map("tasks")
+}
+
+model TaskAssignee {
+  taskId String @map("task_id") @db.Uuid
+  task   Task   @relation(fields: [taskId], references: [id])
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@id([taskId, userId])
+  @@map("task_assignees")
+}
+
+/// Notă — aceeași formă ca Task, plus `isFavorite` (secțiunea „Favorites"
+/// din demo).
+model Note {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  title      String
+  content    String?
+  category   String?
+  priority   String    @default("medium")
+  status     String    @default("pending")
+  dueAt      DateTime? @map("due_at") @db.Timestamptz(6)
+  isFavorite Boolean   @default(false) @map("is_favorite")
+  companyId  String?   @map("company_id") @db.Uuid
+  company    Company?  @relation(fields: [companyId], references: [id])
+  contactId  String?   @map("contact_id") @db.Uuid
+  contact    Contact?  @relation(fields: [contactId], references: [id])
+  dealId     String?   @map("deal_id") @db.Uuid
+  deal       Deal?     @relation(fields: [dealId], references: [id])
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  assignees NoteAssignee[]
+
+  @@index([tenantId])
+  @@map("notes")
+}
+
+model NoteAssignee {
+  noteId String @map("note_id") @db.Uuid
+  note   Note   @relation(fields: [noteId], references: [id])
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@id([noteId, userId])
+  @@map("note_assignees")
+}
+
+/// „Team" dintr-o companie (avatarele din demo) — useri reali ai firmei
+/// asignați ca proprietari/responsabili de cont pe acea companie.
+model CompanyTeamMember {
+  companyId String  @map("company_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id])
+  userId    String  @map("user_id") @db.Uuid
+  user      User    @relation(fields: [userId], references: [id])
+
+  @@id([companyId, userId])
+  @@map("company_team_members")
 }
 
 /// TaxTable (SAF-T) — istoric complet de cote TVA, niciodată doar valoarea
@@ -273,39 +468,40 @@ model InvoiceSeries {
 /// prin `reversedInvoiceId`). `eInvoiceStatus` urmărește transmiterea
 /// automată e-Factura (obligatorie, declanșată la draft→issued — CLAUDE.md).
 model Invoice {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  tenant            Tenant   @relation(fields: [tenantId], references: [id])
-  seriesId          String   @map("series_id") @db.Uuid
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String        @map("tenant_id") @db.Uuid
+  tenant            Tenant        @relation(fields: [tenantId], references: [id])
+  seriesId          String        @map("series_id") @db.Uuid
   series            InvoiceSeries @relation(fields: [seriesId], references: [id])
-  invoiceNo         String   @map("invoice_no") // InvoiceNo (SAF-T)
-  invoiceDate       DateTime @map("invoice_date") @db.Date
-  taxPointDate      DateTime @map("tax_point_date") @db.Date
-  invoiceType       String   @map("invoice_type") // CHECK: Normal|CreditNote|DebitNote|DownPayment
-  customerId        String   @map("customer_id") @db.Uuid
-  customer          Customer @relation(fields: [customerId], references: [id])
-  currency          String   @default("RON")
-  exchangeRate      Decimal  @default(1) @map("exchange_rate") @db.Decimal(12, 6)
-  status            String   // CHECK: draft|issued|sent|paid|partially_paid|overdue|canceled
-  invoiceAmount     Decimal  @map("invoice_amount") @db.Decimal(14, 2) // InvoiceAmount (SAF-T)
+  invoiceNo         String        @map("invoice_no") // InvoiceNo (SAF-T)
+  invoiceDate       DateTime      @map("invoice_date") @db.Date
+  taxPointDate      DateTime      @map("tax_point_date") @db.Date
+  invoiceType       String        @map("invoice_type") // CHECK: Normal|CreditNote|DebitNote|DownPayment
+  companyId         String        @map("company_id") @db.Uuid
+  company           Company       @relation(fields: [companyId], references: [id])
+  currency          String        @default("RON")
+  exchangeRate      Decimal       @default(1) @map("exchange_rate") @db.Decimal(12, 6)
+  status            String // CHECK: draft|issued|sent|paid|partially_paid|overdue|canceled
+  invoiceAmount     Decimal       @map("invoice_amount") @db.Decimal(14, 2) // InvoiceAmount (SAF-T)
   // storno -> factura originală. onDelete: Restrict explicit (nu implicitul
   // SetNull al Prisma pt. relații opționale) — o notă de credit nu trebuie
   // să-și piardă niciodată trasabilitatea către originalul stornat, cerință
   // SAF-T/audit directă. CHECK reversed_invoice_id <> id — vezi migrarea SQL.
-  reversedInvoiceId String?  @map("reversed_invoice_id") @db.Uuid
-  reversedInvoice   Invoice? @relation("InvoiceReversal", fields: [reversedInvoiceId], references: [id], onDelete: Restrict)
-  reversedBy        Invoice[] @relation("InvoiceReversal")
-  eInvoiceId        String?  @map("e_invoice_id") // eInvoiceID (SAF-T) — id SPV
-  eInvoiceStatus    String?  @map("e_invoice_status") // pending | validated | rejected | error
-  createdBy         String   @map("created_by") @db.Uuid
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  reversedInvoiceId String?       @map("reversed_invoice_id") @db.Uuid
+  reversedInvoice   Invoice?      @relation("InvoiceReversal", fields: [reversedInvoiceId], references: [id], onDelete: Restrict)
+  reversedBy        Invoice[]     @relation("InvoiceReversal")
+  eInvoiceId        String?       @map("e_invoice_id") // eInvoiceID (SAF-T) — id SPV
+  eInvoiceStatus    String?       @map("e_invoice_status") // pending | validated | rejected | error
+  createdBy         String        @map("created_by") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
 
   lines    InvoiceLine[]
   auditLog InvoiceAuditLog[]
+  deals    Deal[]
 
   @@unique([tenantId, seriesId, invoiceNo])
   @@index([tenantId])
-  @@index([customerId])
+  @@index([companyId])
   @@index([status])
   @@index([invoiceDate])
   @@map("invoices")
@@ -315,23 +511,23 @@ model Invoice {
 /// momentul facturării, înghețat — nu se recalculează retroactiv la
 /// schimbarea legii (vezi invoicing-spec.md, „Rezolvarea cotei TVA").
 model InvoiceLine {
-  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  invoiceId     String  @map("invoice_id") @db.Uuid
-  invoice       Invoice @relation(fields: [invoiceId], references: [id])
-  lineNumber    Int     @map("line_number") // LineNumber (SAF-T)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId     String   @map("invoice_id") @db.Uuid
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id])
+  lineNumber    Int      @map("line_number") // LineNumber (SAF-T)
   // onDelete: Restrict explicit (nu implicitul SetNull) — un Product șters
   // nu trebuie să lase o linie de factură deja emisă fără ProductCode
   // (câmp obligatoriu SAF-T, nedenormalizat pe invoice_lines).
-  productId     String? @map("product_id") @db.Uuid
+  productId     String?  @map("product_id") @db.Uuid
   product       Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
   description   String
-  quantity      Decimal @db.Decimal(14, 3)
-  unitOfMeasure String  @map("unit_of_measure")
-  unitPrice     Decimal @map("unit_price") @db.Decimal(14, 4)
-  lineAmount    Decimal @map("line_amount") @db.Decimal(14, 2) // LineAmount (SAF-T)
-  taxCodeId     String  @map("tax_code_id") @db.Uuid // TaxID (SAF-T)
-  taxCode       TaxCode @relation(fields: [taxCodeId], references: [id])
-  taxAmount     Decimal @map("tax_amount") @db.Decimal(14, 2) // TaxAmount (SAF-T)
+  quantity      Decimal  @db.Decimal(14, 3)
+  unitOfMeasure String   @map("unit_of_measure")
+  unitPrice     Decimal  @map("unit_price") @db.Decimal(14, 4)
+  lineAmount    Decimal  @map("line_amount") @db.Decimal(14, 2) // LineAmount (SAF-T)
+  taxCodeId     String   @map("tax_code_id") @db.Uuid // TaxID (SAF-T)
+  taxCode       TaxCode  @relation(fields: [taxCodeId], references: [id])
+  taxAmount     Decimal  @map("tax_amount") @db.Decimal(14, 2) // TaxAmount (SAF-T)
 
   @@unique([invoiceId, lineNumber])
   @@map("invoice_lines")
@@ -342,7 +538,7 @@ model InvoiceAuditLog {
   id          BigInt   @id @default(autoincrement())
   invoiceId   String   @map("invoice_id") @db.Uuid
   invoice     Invoice  @relation(fields: [invoiceId], references: [id])
-  action      String   // created | issued | sent | paid | canceled
+  action      String // created | issued | sent | paid | canceled
   performedBy String   @map("performed_by") @db.Uuid
   performedAt DateTime @default(now()) @map("performed_at") @db.Timestamptz(6)
   details     Json?
