@@ -217,20 +217,59 @@ export class UsersService {
     // verificăm explicit accesul la firma curentă înainte de scriere,
     // altfel un owner/admin ar putea reseta parola oricărui user din
     // platformă doar ghicindu-i id-ul (breșă IDOR, regula #6 din
-    // CLAUDE.md). Verificare + scriere în ACEEAȘI tranzacție (fix logic-
-    // reviewer) — altfel un TOCTOU îngust: accesul revocat exact între
-    // citire și scriere (alt owner dezactivează concurent userul) tot ar
-    // lăsa reset-ul de parolă să treacă.
+    // CLAUDE.md).
+    //
+    // Blocăm explicit resetul dacă userul țintă mai are acces ACTIV la
+    // vreo altă firmă — fix logic-reviewer (BLOCANT, preluare de cont
+    // cross-tenant): parola fiind globală, fără această verificare un
+    // owner/admin al firmei A ar putea seta o parolă nouă pentru userul X
+    // (care are și acces la firma B, complet nelegată de A), să se
+    // autentifice el însuși ca X, și prin POST /auth/switch-tenant —
+    // care verifică DOAR dacă X are acces la firma țintă, nu cine a
+    // inițiat login-ul — să obțină acces complet (inclusiv rolul lui X)
+    // la firma B. Nu există încă un flux self-service (email) de resetare
+    // a parolei — până atunci, reset direct de admin e permis DOAR când
+    // userul țintă nu are acces activ la nicio altă firmă.
+    //
+    // Verificare + scriere în ACEEAȘI tranzacție SERIALIZABLE (fix logic-
+    // reviewer/rbac-guardian: Read Committed nu închide complet fereastra)
+    // — altfel un TOCTOU rămânea posibil: acces la o a doua firmă acordat
+    // concurent exact între citire și scriere.
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-    await this.prisma.$transaction(async (tx) => {
-      const access = await tx.userTenantAccess.findFirst({
-        where: { tenantId, userId: id },
-      });
-      if (!access) {
-        throw new NotFoundException(`Userul „${id}” nu există.`);
+    try {
+      await this.prisma.$transaction(
+        async (tx) => {
+          const access = await tx.userTenantAccess.findFirst({
+            where: { tenantId, userId: id },
+          });
+          if (!access) {
+            throw new NotFoundException(`Userul „${id}” nu există.`);
+          }
+
+          const otherActiveTenants = await tx.userTenantAccess.count({
+            where: { userId: id, isActive: true, tenantId: { not: tenantId } },
+          });
+          if (otherActiveTenants > 0) {
+            throw new ForbiddenException(
+              'Acest user are acces activ și la alte firme — parola e ' +
+                'globală, deci nu poate fi resetată direct de aici fără să ' +
+                'afecteze și accesul lui acolo. Nu există încă un flux ' +
+                'self-service de resetare a parolei.',
+            );
+          }
+
+          await tx.user.update({ where: { id }, data: { passwordHash } });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (err) {
+      if (this.isPrismaError(err, 'P2034')) {
+        throw new ConflictException(
+          'Actualizare concurentă pe același user — reîncearcă.',
+        );
       }
-      await tx.user.update({ where: { id }, data: { passwordHash } });
-    });
+      throw err;
+    }
   }
 
   async assignModuleRole(

@@ -70,8 +70,13 @@ export class AuthService {
       orderBy: { createdAt: 'asc' },
     });
 
+    // Mesaj generic identic cu cel de mai sus (fix logic-reviewer) — un
+    // mesaj distinct aici ("cont fără nicio firmă") ar lăsa pe cineva care
+    // deja deține o parolă validă (phishing, refolosire credențiale) să
+    // distingă acest caz de "parolă greșită", spărgând anti-enumerarea
+    // aplicată explicit cu doar câteva linii mai sus.
     if (access.length === 0) {
-      throw new UnauthorizedException('Contul nu are acces la nicio firmă.');
+      throw new UnauthorizedException('Email sau parolă incorecte.');
     }
 
     if (access.length === 1) {

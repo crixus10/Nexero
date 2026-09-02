@@ -36,8 +36,12 @@ export class ModuleRoleGuard implements CanActivate {
     const request = context
       .switchToHttp()
       .getRequest<Request & Partial<RequestWithUser>>();
-    if (!request.user) {
-      throw new UnauthorizedException('Lipsește autentificarea.');
+    // Plasă defensivă explicită, nu doar convenție — fix rbac-guardian, la
+    // fel ca în GlobalRoleGuard (vezi comentariul acolo).
+    if (!request.user || !request.user.tenantId) {
+      throw new UnauthorizedException(
+        'Lipsește autentificarea sau firma activă (alege firma prin POST /auth/switch-tenant).',
+      );
     }
     const { tenantId, userId } = request.user;
 

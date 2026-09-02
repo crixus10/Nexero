@@ -36,8 +36,16 @@ export class GlobalRoleGuard implements CanActivate {
     const request = context
       .switchToHttp()
       .getRequest<Request & Partial<RequestWithUser>>();
-    if (!request.user) {
-      throw new UnauthorizedException('Lipsește autentificarea.');
+    // Plasă defensivă explicită, nu doar convenție — fix rbac-guardian:
+    // fără ea, un handler viitor care ar combina @AllowPreTenant() cu
+    // @RequireGlobalRole primește un request.user fără tenantId (token
+    // „pre-tenant"), iar `tenantId: undefined` ajuns într-un filtru Prisma
+    // e IGNORAT silențios (nu tratat ca IS NULL) — exact capcana descrisă
+    // în jwt-auth.guard.ts, de data asta ocolind acel guard.
+    if (!request.user || !request.user.tenantId) {
+      throw new UnauthorizedException(
+        'Lipsește autentificarea sau firma activă (alege firma prin POST /auth/switch-tenant).',
+      );
     }
     const { tenantId, userId } = request.user;
 

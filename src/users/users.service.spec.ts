@@ -296,13 +296,14 @@ describe('UsersService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('resetează parola pe identitatea globală dacă userul are acces la tenant', async () => {
+    it('resetează parola pe identitatea globală dacă userul are acces la tenant și la nicio altă firmă', async () => {
       prisma.userTenantAccess.findFirst.mockResolvedValue({
         tenantId,
         userId: 'u1',
         role: 'operator',
         isActive: true,
       });
+      prisma.userTenantAccess.count.mockResolvedValue(0);
 
       let updateArgs:
         | { where: Record<string, unknown>; data: Record<string, unknown> }
@@ -319,8 +320,26 @@ describe('UsersService', () => {
 
       await service.resetPassword(tenantId, 'u1', 'parolanoua123');
 
+      expect(prisma.userTenantAccess.count).toHaveBeenCalledWith({
+        where: { userId: 'u1', isActive: true, tenantId: { not: tenantId } },
+      });
       expect(updateArgs?.where).toEqual({ id: 'u1' });
       expect(typeof updateArgs?.data.passwordHash).toBe('string');
+    });
+
+    it('respinge reset-ul cu ForbiddenException dacă userul are acces activ și la altă firmă (fix preluare cross-tenant)', async () => {
+      prisma.userTenantAccess.findFirst.mockResolvedValue({
+        tenantId,
+        userId: 'u1',
+        role: 'operator',
+        isActive: true,
+      });
+      prisma.userTenantAccess.count.mockResolvedValue(1); // acces activ pe altă firmă
+
+      await expect(
+        service.resetPassword(tenantId, 'u1', 'parolanoua123'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
 

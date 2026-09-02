@@ -109,11 +109,11 @@ describe('AuthService', () => {
     findUnique.mockResolvedValue(seededUser);
     findMany.mockResolvedValue([]);
 
+    // Mesaj generic identic cu cazul "parolă greșită" — fix logic-reviewer,
+    // anti-enumerare (vezi comentariul din auth.service.ts).
     await expect(
       service.login('test@nexero.local', 'parola-corecta'),
-    ).rejects.toThrow(
-      new UnauthorizedException('Contul nu are acces la nicio firmă.'),
-    );
+    ).rejects.toThrow(new UnauthorizedException('Email sau parolă incorecte.'));
   });
 
   it('emite un token PRE-TENANT (fără tenantId) + lista de firme, când userul are acces la mai multe', async () => {
