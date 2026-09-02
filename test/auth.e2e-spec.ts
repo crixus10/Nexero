@@ -175,7 +175,7 @@ describe('Auth (e2e)', () => {
     await request(app.getHttpServer()).get('/auth/me').expect(401);
   });
 
-  it('GET /auth/me cu token valid → 200 + userId/tenantId', async () => {
+  it('GET /auth/me cu token valid → 200 + userId/tenantId/tenantName', async () => {
     const login = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: TEST_EMAIL, password: TEST_PASSWORD })
@@ -189,6 +189,7 @@ describe('Auth (e2e)', () => {
 
     expect(me.body).toHaveProperty('userId');
     expect(me.body).toHaveProperty('tenantId');
+    expect(me.body).toMatchObject({ tenantName: 'E2E Auth Test Tenant' });
   });
 
   // Fix logic-reviewer: fluxul multi-firmă (token „pre-tenant" +
@@ -249,7 +250,10 @@ describe('Auth (e2e)', () => {
         .get('/auth/me')
         .set('Authorization', `Bearer ${body.accessToken}`)
         .expect(200);
-      expect((me.body as { tenantId: string }).tenantId).toBe(tenantB.id);
+      expect(me.body).toMatchObject({
+        tenantId: tenantB.id,
+        tenantName: 'E2E Multi Tenant B',
+      });
     });
 
     it('switch-tenant către o firmă la care userul NU are acces → 403', async () => {

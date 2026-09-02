@@ -48,10 +48,15 @@ export class AuthController {
     return this.authService.switchTenant(user.userId, dto.tenantId);
   }
 
-  // Rută minimă de verificare — dovedește că JwtAuthGuard (acum global,
-  // fără @UseGuards explicit aici) + @CurrentUser funcționează end-to-end.
+  // Dovedește că JwtAuthGuard (global) + @CurrentUser funcționează
+  // end-to-end, ȘI oferă `tenantName` pentru UI (header — „firma la care
+  // sunt conectat"). Un query DB în plus per apel e acceptabil: e o rută
+  // ieftină, apelată rar (o dată la login/reload), nu pe fiecare request.
   @Get('me')
-  me(@CurrentUser() user: AuthenticatedUser): AuthenticatedUser {
-    return user;
+  async me(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<AuthenticatedUser & { tenantName: string }> {
+    const tenantName = await this.authService.getTenantName(user.tenantId);
+    return { ...user, tenantName };
   }
 }

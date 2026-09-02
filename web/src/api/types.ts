@@ -9,6 +9,11 @@ export interface AuthenticatedUser {
   tenantId: string;
 }
 
+/** GET /auth/me — identic cu AuthenticatedUser + numele firmei active (pentru afișare în header). */
+export interface CurrentUserInfo extends AuthenticatedUser {
+  tenantName: string;
+}
+
 /** GET /users — restricționat la owner/admin (rol global); vezi UsersApi. */
 export interface UserRef {
   id: string;

@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Moon, Sun } from 'lucide-react';
+import { Building2, LogOut, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/auth/AuthContext';
 import { getInitials } from '@/lib/helpers';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +22,7 @@ import { Button } from '@/components/ui/button';
  */
 export function HeaderToolbar() {
   const { theme, setTheme } = useTheme();
-  const { email, logout } = useAuth();
+  const { email, tenantName, logout } = useAuth();
   const navigate = useNavigate();
 
   function handleLogout() {
@@ -35,6 +36,18 @@ export function HeaderToolbar() {
 
   return (
     <nav className="flex items-center gap-2.5">
+      {tenantName && (
+        <Badge
+          variant="primary"
+          appearance="light"
+          size="lg"
+          className="hidden sm:inline-flex max-w-48"
+          title={tenantName}
+        >
+          <Building2 />
+          <span className="truncate">{tenantName}</span>
+        </Badge>
+      )}
       <Button
         variant="ghost"
         size="icon"
@@ -59,6 +72,11 @@ export function HeaderToolbar() {
               <span className="text-sm font-semibold text-foreground truncate">
                 {email ?? 'Cont'}
               </span>
+              {tenantName && (
+                <span className="text-xs text-muted-foreground truncate">
+                  {tenantName}
+                </span>
+              )}
             </div>
           </div>
           <DropdownMenuSeparator />

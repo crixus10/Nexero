@@ -1,8 +1,8 @@
 import { apiFetch } from './client';
 import { ApiError } from './client';
 import type {
-  AuthenticatedUser,
   Company,
+  CurrentUserInfo,
   Contact,
   ConnectionStrength,
   CreateInvoicePayload,
@@ -26,7 +26,7 @@ export const AuthApi = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
-  me: () => apiFetch<AuthenticatedUser>('/auth/me'),
+  me: () => apiFetch<CurrentUserInfo>('/auth/me'),
 };
 
 export const UsersApi = {

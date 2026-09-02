@@ -121,4 +121,18 @@ export class AuthService {
     const payload: JwtPayload = { sub: userId, tenantId };
     return this.jwt.signAsync(payload);
   }
+
+  /**
+   * Numele firmei active — folosit doar de GET /auth/me, pentru UI (afișat
+   * în header, „firma la care sunt conectat"). Nu e nevoie de verificare
+   * de acces suplimentară aici: JwtAuthGuard garantează deja că tenantId
+   * vine dintr-un JWT valid, deci userul are (sau a avut) acces la el.
+   */
+  async getTenantName(tenantId: string): Promise<string> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { name: true },
+    });
+    return tenant.name;
+  }
 }

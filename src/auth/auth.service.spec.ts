@@ -14,6 +14,7 @@ describe('AuthService', () => {
   let findUnique: jest.Mock;
   let findMany: jest.Mock;
   let findFirst: jest.Mock;
+  let findUniqueOrThrow: jest.Mock;
   let signAsync: jest.Mock;
 
   const seededUser = {
@@ -36,6 +37,7 @@ describe('AuthService', () => {
     findUnique = jest.fn();
     findMany = jest.fn().mockResolvedValue(oneTenantAccess);
     findFirst = jest.fn();
+    findUniqueOrThrow = jest.fn();
     signAsync = jest.fn().mockResolvedValue('fake.jwt.token');
 
     const module: TestingModule = await Test.createTestingModule({
@@ -46,6 +48,7 @@ describe('AuthService', () => {
           useValue: {
             user: { findUnique },
             userTenantAccess: { findMany, findFirst },
+            tenant: { findUniqueOrThrow },
           },
         },
         {
@@ -164,6 +167,20 @@ describe('AuthService', () => {
         service.switchTenant('user-1', 't-necunoscut'),
       ).rejects.toThrow(ForbiddenException);
       expect(signAsync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getTenantName', () => {
+    it('întoarce numele firmei — folosit de GET /auth/me pentru UI (header)', async () => {
+      findUniqueOrThrow.mockResolvedValue({ name: 'Firma 1' });
+
+      const name = await service.getTenantName('t1');
+
+      expect(name).toBe('Firma 1');
+      expect(findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 't1' },
+        select: { name: true },
+      });
     });
   });
 });
