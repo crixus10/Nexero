@@ -7,7 +7,12 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
-import { JwtPayload, RequestWithUser } from './jwt-payload.interface';
+import { ALLOW_PRE_TENANT_KEY } from './allow-pre-tenant.decorator';
+import {
+  JwtPayload,
+  RequestWithPreTenantUser,
+  RequestWithUser,
+} from './jwt-payload.interface';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
 /**
@@ -24,6 +29,17 @@ import { IS_PUBLIC_KEY } from './public.decorator';
  * responsabilitatea codului din fiecare modul de business (acest guard e
  * doar precondiția care face regula posibil de respectat, nu o aplică
  * mecanic peste query-uri Prisma scrise manual).
+ *
+ * Multi-firmă (docs/data-model.md): un token poate fi „pre-tenant" (fără
+ * `tenantId` în payload) — respins implicit aici, exact ca lipsa
+ * tokenului, DECÂT pe rutele @AllowPreTenant() (azi doar
+ * POST /auth/switch-tenant). Fără acest refuz explicit, un `tenantId`
+ * `undefined` ar ajunge în `request.user` și, mai departe, într-un filtru
+ * Prisma `where: { tenantId: undefined }` — pe care Prisma îl IGNORĂ
+ * complet (nu-l tratează ca IS NULL), transformând orice query tenant-
+ * scoped într-o interogare cross-tenant. Garantarea aici, o singură dată,
+ * ține restul guard-urilor (ModuleGuard, GlobalRoleGuard, ModuleRoleGuard)
+ * neschimbate — pot presupune mereu `tenantId: string`.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -47,16 +63,31 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Lipsește tokenul de autentificare.');
     }
 
+    let payload: JwtPayload;
     try {
-      const payload = await this.jwt.verifyAsync<JwtPayload>(token);
-      (request as RequestWithUser).user = {
-        userId: payload.sub,
-        tenantId: payload.tenantId,
-      };
+      payload = await this.jwt.verifyAsync<JwtPayload>(token);
     } catch {
       throw new UnauthorizedException('Token invalid sau expirat.');
     }
 
+    if (!payload.tenantId) {
+      const allowPreTenant = this.reflector.getAllAndOverride<boolean>(
+        ALLOW_PRE_TENANT_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+      if (!allowPreTenant) {
+        throw new UnauthorizedException(
+          'Alege firma (POST /auth/switch-tenant) înainte de a continua.',
+        );
+      }
+      (request as RequestWithPreTenantUser).user = { userId: payload.sub };
+      return true;
+    }
+
+    (request as RequestWithUser).user = {
+      userId: payload.sub,
+      tenantId: payload.tenantId,
+    };
     return true;
   }
 

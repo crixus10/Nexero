@@ -21,6 +21,7 @@ describe('CompaniesService', () => {
       deleteMany: jest.Mock;
     };
     companyTeamMember: { deleteMany: jest.Mock; createMany: jest.Mock };
+    userTenantAccess: { count: jest.Mock };
     $transaction: jest.Mock;
   };
   let anaf: { validateCui: jest.Mock; normalizeCuiUnverified: jest.Mock };
@@ -37,6 +38,7 @@ describe('CompaniesService', () => {
         deleteMany: jest.fn(),
       },
       companyTeamMember: { deleteMany: jest.fn(), createMany: jest.fn() },
+      userTenantAccess: { count: jest.fn() },
       $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
         fn(prisma),
       ),
@@ -51,6 +53,33 @@ describe('CompaniesService', () => {
       anaf as unknown as AnafService,
       codeSequence as unknown as CodeSequenceService,
     );
+  });
+
+  it('respinge teamUserIds cu un user care nu are acces activ la firmă (gardă IDOR)', async () => {
+    prisma.userTenantAccess.count.mockResolvedValue(1); // doar 1 din 2 aparține tenantului
+
+    const dto = {
+      name: 'Firma X',
+      teamUserIds: ['u1', 'u2'],
+    } as CreateCompanyDto;
+
+    await expect(service.create(tenantId, dto)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(prisma.userTenantAccess.count).toHaveBeenCalledWith({
+      where: { userId: { in: ['u1', 'u2'] }, tenantId, isActive: true },
+    });
+    expect(prisma.company.create).not.toHaveBeenCalled();
+  });
+
+  it('creează compania când toți userii din teamUserIds au acces activ la firmă', async () => {
+    prisma.userTenantAccess.count.mockResolvedValue(1);
+    prisma.company.create.mockResolvedValue({ id: 'c1' });
+
+    const dto = { name: 'Firma X', teamUserIds: ['u1'] } as CreateCompanyDto;
+    await service.create(tenantId, dto);
+
+    expect(prisma.company.create).toHaveBeenCalled();
   });
 
   it('alocă automat companyCode prin CodeSequenceService, niciodată din input', async () => {

@@ -39,7 +39,11 @@ cale de acces care nu trece explicit prin `PlatformAdminGuard`.
 real în `src/auth/` — nu e un gap de schemă, e cod funcțional (vezi
 `docs/data-model.md`, secțiunea „Autentificare (JWT)"). Decizie deja fixată
 prin implementare, nu de redeschis aici: `users.email` e `UNIQUE` **global**
-(nu per-tenant) — un user aparține unei singure firme.
+(nu per-tenant). De la migrarea multi-firmă (2026-09-02,
+`docs/data-model.md`, secțiunea „Multi-firmă — un user poate accesa mai
+multe firme (user_tenant_access)"), un user NU mai aparține unei singure
+firme fix — accesul lui la una sau mai multe firme (cu rol propriu pe
+fiecare) se ține în `user_tenant_access`, separat de identitate.
 
 Coloanele `full_name`/`role`/`is_active` pe `users` (RBAC per-modul, conform
 `docs/invoicing-spec.md`) sunt **deja implementate** (migrarea
@@ -57,8 +61,10 @@ Două tabele noi + o extensie pe `users`, toate documentate cu DDL complet
 în `docs/data-model.md` (nu duplicat aici, ca să nu existe două surse de
 adevăr pentru schemă):
 
-- **`users`** (extins, nu recreat) — capătă `full_name`/`role`/`is_active`
-  pentru RBAC; `tenant_id` și `email` (UNIQUE global) rămân neschimbate.
+- **`users`** (extins, nu recreat) — capătă `full_name`/`is_active` pentru
+  RBAC; `email` (UNIQUE global) rămâne neschimbat. `tenant_id`/`role` NU
+  mai stau pe `users` — mutate în `user_tenant_access` de migrarea
+  multi-firmă (2026-09-02, `docs/data-model.md`, secțiunea „Multi-firmă").
 - **`platform_admins`** — contul de staff Mittani Solutions; **fără**
   `tenant_id`, intenționat — nu aparține niciunui client, la fel cum
   `portal_users` nu aparține niciunui tenant, dar din motivul opus (aici,

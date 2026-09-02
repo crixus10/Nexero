@@ -340,8 +340,9 @@ modulul CRM, cu propriile roluri `crm:viewer/agent/admin`, vezi
 `docs/crm-spec.md`.
 
 Aceste roluri se stochează în tabelul comun `user_module_roles`
-(`module_code = 'invoicing'`), NU în coloana globală `users.role` — cele
-două sunt niveluri separate de rol, vezi `docs/data-model.md`, secțiunea
+(`module_code = 'invoicing'`), NU în coloana `user_tenant_access.role`
+(fostul `users.role`, mutat de migrarea multi-firmă) — cele două sunt
+niveluri separate de rol, vezi `docs/data-model.md`, secțiunea
 „RBAC — users.role (global) + user_module_roles (per-modul)".
 
 ## Multi-language

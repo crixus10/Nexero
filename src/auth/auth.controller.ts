@@ -7,10 +7,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import { AuthService } from './auth.service';
-import { CurrentUser } from './current-user.decorator';
+import { AllowPreTenant } from './allow-pre-tenant.decorator';
+import { AuthService, LoginResult } from './auth.service';
+import { CurrentPreTenantUser, CurrentUser } from './current-user.decorator';
 import { LoginDto } from './dto/login.dto';
-import type { AuthenticatedUser } from './jwt-payload.interface';
+import { SwitchTenantDto } from './dto/switch-tenant.dto';
+import type { AuthenticatedUser, PreTenantUser } from './jwt-payload.interface';
 import { Public } from './public.decorator';
 
 @Controller('auth')
@@ -25,8 +27,25 @@ export class AuthController {
   @UseGuards(ThrottlerGuard)
   @HttpCode(200)
   @Post('login')
-  login(@Body() dto: LoginDto): Promise<{ accessToken: string }> {
+  login(@Body() dto: LoginDto): Promise<LoginResult> {
     return this.authService.login(dto.email, dto.password);
+  }
+
+  // Multi-firmă (docs/data-model.md): acceptă și tokenul „pre-tenant"
+  // primit la login (user cu acces la mai multe firme), și un token deja
+  // complet (userul își schimbă firma activă din mers) — vezi
+  // @AllowPreTenant() și AuthService.switchTenant(). ThrottlerGuard local,
+  // aceeași motivație ca la /auth/login — emite un JWT nou, la fel de
+  // sensibil la abuz prin apeluri repetate.
+  @AllowPreTenant()
+  @UseGuards(ThrottlerGuard)
+  @HttpCode(200)
+  @Post('switch-tenant')
+  switchTenant(
+    @CurrentPreTenantUser() user: PreTenantUser,
+    @Body() dto: SwitchTenantDto,
+  ): Promise<LoginResult> {
+    return this.authService.switchTenant(user.userId, dto.tenantId);
   }
 
   // Rută minimă de verificare — dovedește că JwtAuthGuard (acum global,

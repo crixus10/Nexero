@@ -96,7 +96,14 @@ CREATE TABLE usage_events (
   occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Utilizatori care se autentifică (login) — vezi secțiunea Autentificare
+-- Utilizatori care se autentifică (login) — vezi secțiunea Autentificare.
+-- Forma AFIȘATĂ AICI e starea INIȚIALĂ (2026-08-26); users a primit apoi
+-- full_name/role/is_active prin ALTER (secțiunea RBAC), iar tenant_id/role
+-- au fost eliminate din nou de migrarea multi-firmă (secțiunea „Multi-
+-- firmă" mai jos) — starea REALĂ curentă e cea din `prisma/schema.prisma`:
+-- users(id, email UNIQUE, password_hash, full_name, is_active, created_at),
+-- FĂRĂ tenant_id/role. Nu recopia acest bloc ca sursă de adevăr a schemei
+-- curente — e păstrat doar ca istoric al primei migrări.
 CREATE TABLE users (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id      UUID NOT NULL REFERENCES tenants(id),
@@ -110,11 +117,13 @@ Fiecare modul de business (facturi, stocuri etc.) are propriile tabele,
 separate de acestea, referind doar `tenant_id`. Nu adăuga coloane de
 business în `tenant_modules` — el rămâne strict despre acces și facturare.
 
-`users` e minimal, deliberat: un user aparține unei singure firme
-(`tenant_id`), nu mai multora. Nu acoperă cazul unui cabinet contabil care
-lucrează pentru mai mulți clienți (asta ar cere un tabel de asociere
-many-to-many) — de construit doar când apare cerința reală, per regulile
-din `docs/roadmap.md`, nu speculativ acum.
+`users` e independent de firmă din construcție — un user nu are
+`tenant_id`/`role` proprii, accesul lui la una sau mai multe firme se ține
+separat, în `user_tenant_access` (vezi secțiunea „Multi-firmă" mai jos).
+Decizie: 2026-09-02, cerință reală confirmată (Sorin gestionează personal
+mai multe firme prin același cont; acces pentru clienți externi ai unei
+firme de contabilitate rămâne deschis pentru mai târziu, expus prin API,
+nu prin acest mecanism).
 
 ## Coduri auto-generate (`code_sequences`)
 
@@ -154,8 +163,11 @@ business, nu stă în `src/modules/`).
 
 - `POST /auth/login` — primește `{ email, password }`, verifică parola cu
   `bcryptjs` (`compare` contra `users.password_hash`), emite un JWT.
-- Payload JWT: `{ sub: user.id, tenantId: user.tenantId }` — `sub` e
-  convenția standard pentru id-ul subiectului.
+- Payload JWT: `{ sub: user.id, tenantId }` — `sub` e convenția standard
+  pentru id-ul subiectului. `tenantId` vine ACUM din `user_tenant_access`
+  (userul nu mai are `tenantId` propriu — vezi secțiunea „Multi-firmă" mai
+  jos) și e OPȚIONAL în payload: absent doar pe tokenul „pre-tenant", emis
+  când userul are acces la mai multe firme și încă n-a ales una.
 - Secretul de semnare vine din `JWT_SECRET` (env) — niciodată hardcodat.
   Vezi `.env.example`.
 - `JwtAuthGuard` (`src/auth/jwt-auth.guard.ts`) verifică tokenul din header
@@ -388,13 +400,20 @@ consum.
 
 **Implementat** (nu doar schemă) — `src/users/` (management complet de
 useri) + `src/rbac/` (guard-uri), nucleu, ca `src/auth/`, `src/entitlements/`.
-Migrare: `prisma/migrations/20260831171502_add_user_roles/`.
+Migrare: `prisma/migrations/20260831171502_add_user_roles/` — SUPRASCRISĂ
+parțial de `20260902120000_user_tenant_access/` (secțiunea „Multi-firmă"
+mai jos): rolul global NU mai stă pe coloana `users.role` (eliminată), ci
+pe `user_tenant_access.role`, per pereche user-firmă. Restul acestei
+secțiuni (nivelul per-modul, `user_module_roles`) rămâne neschimbat —
+citește „global (pe companie)" mai jos ca „global pe FIRMA CURENTĂ", nu
+ca o proprietate fixă a userului.
 
 **Două niveluri de rol, nu unul — nu le confunda:**
 
-- `users.role` e rolul **global, pe companie** (gestiune utilizatori,
-  restricționează `src/users/`) — grosier, un singur enum valabil pentru
-  orice modul: `owner | admin | accountant | operator`.
+- `users.role` (azi `user_tenant_access.role`, vezi nota de mai sus) e
+  rolul **global, pe companie** (gestiune utilizatori, restricționează
+  `src/users/`) — grosier, un singur enum valabil pentru orice modul:
+  `owner | admin | accountant | operator`.
 - Rolurile **per-modul** (ex. `invoicing:viewer/issuer/approver/admin`,
   documentate în `docs/invoicing-spec.md`) au nevoie de granularitate pe
   care un singur enum global n-o poate exprima — un `operator` global
@@ -444,7 +463,9 @@ mai jos filtrează explicit `isActive: true`, nu doar rolul), globale
 `if (!request.user)`:
 
 - `GlobalRoleGuard` + `@RequireGlobalRole('owner', 'admin')` — verifică
-  `users.role`. Folosit azi doar pe `UsersController` (`src/users/`).
+  `users.role` (azi `user_tenant_access.role`, vezi secțiunea „Multi-firmă"
+  mai jos — coloana `users.role` a fost eliminată). Folosit azi doar pe
+  `UsersController` (`src/users/`).
 - `ModuleRoleGuard` + `@RequireModuleRole('invoicing:issuer', ...)` —
   verifică `user_module_roles`, „oricare din" lista dată. Se pune
   ÎMPREUNĂ cu `@RequireModule('x')` pe același handler, nu în locul lui —
@@ -466,6 +487,139 @@ tranzacție). Fără ambele reguli, orice `admin` ar putea crea/auto-promova
 la `owner` fără control — exact breșa găsită și corectată în această
 sesiune. Simetric cu protecția „nu rămâne firma fără owner activ" (aceeași
 metodă `update()`), tot sub tranzacție `Serializable`.
+
+## Multi-firmă — un user poate accesa mai multe firme (`user_tenant_access`)
+
+**Implementat** (nu doar schemă) — `src/auth/`, `src/rbac/`, `src/users/`.
+Migrare: `prisma/migrations/20260902120000_user_tenant_access/`.
+
+**Decizie (2026-09-02):** un cont/user poate ține evidența la mai multe
+firme, cu rol propriu pe fiecare — nu doar cazul unui antreprenor cu mai
+multe SRL-uri administrate din același login, ci și baza pentru orice
+utilizator viitor cu acces la mai mult de o firmă. Scop limitat, explicit:
+un singur user accesează mai multe tenanți pe care el însuși îi
+administrează. NU acoperă acces încrucișat între conturi diferite (ex. un
+cabinet de contabilitate extern autentificat separat, cu acces la firma
+unui client care are propriul lui cont) — acel caz rămâne, deliberat,
+în afara acestui mecanism; dacă apare cerere reală, se expune prin API
+dedicat, nu prin extinderea `user_tenant_access`.
+
+Înlocuiește `users.tenant_id` și `users.role` (coloanele adăugate în
+`20260831171502_add_user_roles`) — `users` redevine identitate pură,
+independentă de firmă.
+
+```sql
+-- Înlocuiește users.tenant_id (FK unic) și users.role (enum unic) —
+-- accesul și rolul devin proprietăți ale relației user-firmă, nu ale
+-- userului. users.email rămâne UNIQUE global (neschimbat).
+ALTER TABLE users DROP COLUMN tenant_id;
+ALTER TABLE users DROP COLUMN role;
+
+CREATE TABLE user_tenant_access (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id),
+  tenant_id   UUID NOT NULL REFERENCES tenants(id),
+  role        TEXT NOT NULL
+    CHECK (role IN ('owner','admin','accountant','operator')),
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, tenant_id)
+);
+```
+
+Migrare de date: pentru fiecare `users` existent, se inserează un rând în
+`user_tenant_access` din `(tenant_id, role)` de dinainte de migrare,
+înainte de a elimina coloanele — o singură migrare Prisma, cu pasul de
+backfill inclus (nu două migrări separate, ca să nu existe fereastră în
+care userii n-au niciun rând de acces).
+
+`users.is_active` RĂMÂNE pe `users` (nu s-a mutat) — e comutatorul GLOBAL
+de cont (dezactivează login-ul peste tot, pe orice firmă), distinct de
+`user_tenant_access.is_active` (revocă doar accesul la O firmă anume,
+contul rămâne activ pe restul). Ambele guard-urile RBAC verifică pe
+amândouă — vezi „Impact asupra RBAC" mai jos.
+
+### Impact asupra autenticării (`src/auth/`) — schimbare de comportament
+
+Azi, JWT conține `{ sub, tenantId }` fix, stabilit o singură dată la
+login. Cu multi-firmă, „firma activă" devine o alegere explicită a
+userului, nu o proprietate fixă a contului. `JwtPayload.tenantId` e acum
+OPȚIONAL (`jwt-payload.interface.ts`) — lipsă doar pe tokenul „pre-tenant".
+
+- `POST /auth/login` — verifică explicit și `users.is_active` (comutatorul
+  GLOBAL de cont), cu ACELAȘI mesaj generic „Email sau parolă incorecte."
+  ca parola greșită/emailul inexistent (fix logic-reviewer: altfel un cont
+  dezactivat global ar fi rămas fără nicio verificare la login, expus doar
+  la o presupunere nescrisă că user_tenant_access s-ar dezactiva în
+  cascadă — ceea ce codul nu face). Dacă userul are acces la o singură
+  firmă (cazul majoritar azi), comportament neschimbat: JWT emis direct cu
+  acel `tenantId`, fără pas suplimentar. Dacă are acces la mai multe,
+  login-ul returnează `{ accessToken, tenants }` — `accessToken` e un
+  token „pre-tenant" (fără `tenantId`), `tenants` lista de firme
+  (`user_tenant_access` unde `is_active`, cu `role`).
+- `POST /auth/switch-tenant` (nou) — primește `tenantId` cerut, verifică
+  LIVE din `user_tenant_access` (`user_id`, `tenant_id`, `is_active =
+  true`, plus `users.is_active`) că userul chiar are acces, abia apoi
+  emite un JWT nou cu acel `tenantId`. Verificarea server-side e
+  obligatorie — niciodată încredere în ce trimite clientul fără citire din
+  DB, altfel breșă IDOR (un user ar putea cere acces la o firmă la care nu
+  e asociat). Acceptă și un token deja complet (userul își schimbă firma
+  activă din mers, nu doar imediat după login) — marcată
+  `@AllowPreTenant()` (`src/auth/allow-pre-tenant.decorator.ts`), singura
+  rută din aplicație care acceptă un token fără `tenantId`.
+- `JwtAuthGuard` respinge explicit orice token fără `tenantId` pe o rută
+  FĂRĂ `@AllowPreTenant()` — precondiție obligatorie, nu doar convenție:
+  fără acest refuz, un `tenantId` `undefined` ar ajunge într-un filtru
+  Prisma `where: { tenantId: undefined }`, pe care Prisma îl IGNORĂ complet
+  (nu-l tratează ca IS NULL), transformând orice query tenant-scoped
+  într-o interogare cross-tenant. Verificată o singură dată aici, ca restul
+  guard-urilor (`ModuleGuard`, `GlobalRoleGuard`, `ModuleRoleGuard`) să
+  rămână neschimbate — pot presupune mereu `req.user.tenantId: string`.
+
+### Impact asupra RBAC (`src/rbac/`)
+
+`GlobalRoleGuard` (`@RequireGlobalRole`) citea până acum `users.role`
+direct. Se schimbă să citească rolul din `user_tenant_access`, pentru
+perechea `(userId, tenantId activ din JWT)` — live din DB, la fel ca azi
+(niciodată din token), filtrând explicit `user_tenant_access.is_active`
+ȘI `users.is_active` (RbacService.getGlobalRole). `ModuleRoleGuard`
+(`user_module_roles`, care nu se schimbă structural — are deja `tenant_id`
+propriu) capătă aceeași a doua condiție (`RbacService.hasAnyModuleRole`):
+un user cu rânduri orfane în `user_module_roles` dintr-o firmă la care
+accesul i-a fost revocat NU mai trece — cele două guard-uri globale aplică
+acum ACELEAȘI garanții de bază, nu doar fiecare separat corectă (fix
+rbac-guardian).
+
+Regula „owner nu se auto-promovează, doar un owner existent promovează pe
+altcineva" + „nu rămâne firma fără owner activ" (`UsersService.update()`,
+tranzacție `Serializable`) se aplică identic, doar mutată de pe `users` pe
+`user_tenant_access`, scopată pe `tenant_id`.
+
+### Impact asupra managementului de useri (`src/users/`)
+
+- `POST /users` — creează un user NOU (identitate globală + primul lui
+  rând de acces, pe firma curentă). Eșuează cu 409 dacă email-ul există
+  deja global — vezi nota de mai jos despre ce NU face acest endpoint.
+- **Deliberat NEexpus**: o cale de a acorda acces la firma curentă unui
+  user care EXISTĂ DEJA (alt cont, altă firmă), doar prin cunoașterea
+  email-ului lui, apelabilă de orice owner/admin al firmei curente — fix
+  plan-guardian (scope-creep): o astfel de rută ar depăși scopul
+  decis mai sus („un singur user accesează mai multe tenanți pe care EL
+  ÎNSUȘI îi administrează", NU acces acordat unilateral, fără
+  consimțământ, de un tenant peste identitatea altcuiva). Azi, un al
+  doilea rând de acces pentru un user existent se creează doar direct
+  (seed/provisionare — la fel ca primul rând de acces al oricărui user,
+  care nu are încă o API de auto-creare) — un flux self-service cu
+  confirmare din partea contului țintă (invitație) e de construit separat,
+  doar la cerere reală, nu speculativ acum.
+- `PATCH /users/:id` — `fullName` scrie pe identitatea GLOBALĂ (`users`);
+  `role`/`isActive` scriu pe rândul de acces al firmei curente
+  (`user_tenant_access`), scopate ca înainte.
+- `POST /users/:id/reset-password` — parola e identitate globală, dar
+  ruta rămâne scopată pe firmă: verifică explicit un rând în
+  `user_tenant_access` pentru `(tenantId, id)` înainte de scriere, altfel
+  un owner/admin ar putea reseta parola oricărui user din platformă doar
+  ghicindu-i id-ul (breșă IDOR, regula #6 din CLAUDE.md).
 
 ## Tabele suplimentare — admin platformă, plăți
 

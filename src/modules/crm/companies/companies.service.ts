@@ -237,8 +237,11 @@ export class CompaniesService {
     userIds: string[],
   ): Promise<void> {
     if (userIds.length === 0) return;
-    const count = await this.prisma.user.count({
-      where: { id: { in: userIds }, tenantId },
+    // user.count(tenantId) → userTenantAccess.count(...) — multi-firmă
+    // (docs/data-model.md): apartenența la firmă nu mai e o coloană pe
+    // `users`, e un rând ACTIV în `user_tenant_access`.
+    const count = await this.prisma.userTenantAccess.count({
+      where: { userId: { in: userIds }, tenantId, isActive: true },
     });
     if (count !== userIds.length) {
       throw new BadRequestException(

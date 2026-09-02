@@ -26,7 +26,7 @@ model Tenant {
 
   tenantModules   TenantModule[]
   usageEvents     UsageEvent[]
-  users           User[]
+  userAccess      UserTenantAccess[]
   userModuleRoles UserModuleRole[]
   companies       Company[]
   products        Product[]
@@ -41,30 +41,55 @@ model Tenant {
   @@map("tenants")
 }
 
-/// Utilizatori care se autentifică (login), fiecare aparținând unei
-/// singure firme — un contabil care lucrează pentru mai mulți clienți
-/// (mai multe tenants) nu e acoperit de acest model minim; de revizuit
-/// când apare cerința reală (nu speculativ, per regulile din roadmap.md).
+/// Utilizatori care se autentifică (login) — identitate PURĂ, independentă
+/// de firmă (email/parolă/nume). Accesul la una sau mai multe firme, cu rol
+/// propriu pe fiecare, se ține separat, în `UserTenantAccess` — vezi
+/// docs/data-model.md, secțiunea „Multi-firmă". `isActive` de aici e
+/// comutatorul GLOBAL de cont (dezactivează login-ul peste tot, pe orice
+/// firmă) — distinct de `UserTenantAccess.isActive` (revocă doar accesul
+/// la O firmă anume, contul rămâne activ pe restul).
 model User {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId     String   @map("tenant_id") @db.Uuid
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
   email        String   @unique
   passwordHash String   @map("password_hash")
-  // Rol GLOBAL (companie) — NU rolul per-modul (user_module_roles, mai jos).
-  // Vezi docs/data-model.md, secțiunea „RBAC — users.role (global) + user_module_roles (per-modul)".
   fullName     String   @default("") @map("full_name")
-  role         String   @default("operator") // CHECK: owner|admin|accountant|operator
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  tenantAccess           UserTenantAccess[]
   moduleRoles            UserModuleRole[]
   taskAssignments        TaskAssignee[]
   noteAssignments        NoteAssignee[]
   companyTeamMemberships CompanyTeamMember[]
 
-  @@index([tenantId])
   @@map("users")
+}
+
+/// Accesul unui user la o firmă, cu rolul GLOBAL (companie) al userului PE
+/// ACEA firmă — înlocuiește fostele `users.tenant_id`/`users.role`. Un user
+/// poate avea mai multe rânduri (mai multe firme); o firmă poate avea mai
+/// mulți useri. Vezi docs/data-model.md, secțiunea „Multi-firmă — un user
+/// poate accesa mai multe firme (user_tenant_access)".
+///
+/// Scop limitat, explicit (nu redeschide fără decizie nouă): un singur
+/// cont care administrează el însuși mai multe firme — NU acces încrucișat
+/// între conturi diferite (ex. cabinet contabil extern cu cont propriu,
+/// văzând firma unui client care are propriul lui cont); acel caz rămâne
+/// deliberat în afara acestui mecanism.
+model UserTenantAccess {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id])
+  tenantId  String   @map("tenant_id") @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  role      String // CHECK: owner|admin|accountant|operator
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("user_tenant_access")
 }
 
 /// Roluri per-modul (`invoicing:viewer/issuer/approver/admin` etc.) —

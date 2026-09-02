@@ -16,7 +16,7 @@ describe('NotesService', () => {
     company: { count: jest.Mock };
     contact: { count: jest.Mock };
     deal: { count: jest.Mock };
-    user: { count: jest.Mock };
+    userTenantAccess: { count: jest.Mock };
     $transaction: jest.Mock;
   };
   let service: NotesService;
@@ -33,7 +33,7 @@ describe('NotesService', () => {
       company: { count: jest.fn() },
       contact: { count: jest.fn() },
       deal: { count: jest.fn() },
-      user: { count: jest.fn() },
+      userTenantAccess: { count: jest.fn() },
       $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
         fn(prisma),
       ),

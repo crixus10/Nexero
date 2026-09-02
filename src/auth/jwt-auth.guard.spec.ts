@@ -23,11 +23,16 @@ function makeContext(authorization?: string): {
   return { context, request };
 }
 
-// Reflector mockuit (nu real) — testele de mai jos verifică logica JWT,
-// nu mecanismul de reflecție al metadatelor Nest.
-function makeReflector(isPublic: boolean): Reflector {
+// Reflector mockuit (nu real) — testele de mai jos verifică logica JWT, nu
+// mecanismul de reflecție al metadatelor Nest. `isPublic`/`allowPreTenant`
+// pot fi setate independent — JwtAuthGuard citește ambele metadate cu
+// chei diferite (IS_PUBLIC_KEY, ALLOW_PRE_TENANT_KEY).
+function makeReflector(isPublic: boolean, allowPreTenant = false): Reflector {
   return {
-    getAllAndOverride: jest.fn().mockReturnValue(isPublic),
+    getAllAndOverride: jest
+      .fn()
+      .mockReturnValueOnce(isPublic)
+      .mockReturnValue(allowPreTenant),
   } as unknown as Reflector;
 }
 
@@ -76,7 +81,7 @@ describe('JwtAuthGuard', () => {
     );
   });
 
-  it('atașează request.user și permite accesul la token valid', async () => {
+  it('atașează request.user și permite accesul la token valid (cu tenantId)', async () => {
     const jwt = {
       verifyAsync: jest
         .fn()
@@ -89,5 +94,30 @@ describe('JwtAuthGuard', () => {
 
     expect(allowed).toBe(true);
     expect(request.user).toEqual({ userId: 'user-1', tenantId: 'tenant-1' });
+  });
+
+  it('respinge un token PRE-TENANT (fără tenantId) pe o rută fără @AllowPreTenant()', async () => {
+    const jwt = {
+      verifyAsync: jest.fn().mockResolvedValue({ sub: 'user-1' }),
+    } as unknown as JwtService;
+    const guard = new JwtAuthGuard(jwt, makeReflector(false, false));
+    const { context } = makeContext('Bearer token-pre-tenant');
+
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('acceptă un token PRE-TENANT (fără tenantId) pe o rută @AllowPreTenant()', async () => {
+    const jwt = {
+      verifyAsync: jest.fn().mockResolvedValue({ sub: 'user-1' }),
+    } as unknown as JwtService;
+    const guard = new JwtAuthGuard(jwt, makeReflector(false, true));
+    const { context, request } = makeContext('Bearer token-pre-tenant');
+
+    const allowed = await guard.canActivate(context);
+
+    expect(allowed).toBe(true);
+    expect(request.user).toEqual({ userId: 'user-1' }); // fără tenantId
   });
 });

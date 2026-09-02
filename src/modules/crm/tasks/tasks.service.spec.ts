@@ -16,7 +16,7 @@ describe('TasksService', () => {
     company: { count: jest.Mock };
     contact: { count: jest.Mock };
     deal: { count: jest.Mock };
-    user: { count: jest.Mock };
+    userTenantAccess: { count: jest.Mock };
     $transaction: jest.Mock;
   };
   let service: TasksService;
@@ -33,7 +33,7 @@ describe('TasksService', () => {
       company: { count: jest.fn() },
       contact: { count: jest.fn() },
       deal: { count: jest.fn() },
-      user: { count: jest.fn() },
+      userTenantAccess: { count: jest.fn() },
       $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
         fn(prisma),
       ),
@@ -52,7 +52,7 @@ describe('TasksService', () => {
   });
 
   it('respinge un assigneeUserIds cu un user din altă firmă', async () => {
-    prisma.user.count.mockResolvedValue(1); // doar 1 din 2 aparține tenantului
+    prisma.userTenantAccess.count.mockResolvedValue(1); // doar 1 din 2 aparține tenantului
 
     const dto: CreateTaskDto = {
       title: 'Task',
@@ -65,7 +65,7 @@ describe('TasksService', () => {
 
   it('creează sarcina când toate legăturile aparțin tenantului', async () => {
     prisma.company.count.mockResolvedValue(1);
-    prisma.user.count.mockResolvedValue(1);
+    prisma.userTenantAccess.count.mockResolvedValue(1);
     prisma.task.create.mockResolvedValue({ id: 't1' });
 
     const dto: CreateTaskDto = {

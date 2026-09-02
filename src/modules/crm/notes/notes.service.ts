@@ -150,8 +150,15 @@ export class NotesService {
         throw new BadRequestException('dealId invalid pentru această firmă.');
     }
     if (dto.assigneeUserIds && dto.assigneeUserIds.length > 0) {
-      const c = await this.prisma.user.count({
-        where: { id: { in: dto.assigneeUserIds }, tenantId },
+      // user.count(tenantId) → userTenantAccess.count(...) — multi-firmă
+      // (docs/data-model.md): apartenența la firmă nu mai e o coloană pe
+      // `users`, e un rând ACTIV în `user_tenant_access`.
+      const c = await this.prisma.userTenantAccess.count({
+        where: {
+          userId: { in: dto.assigneeUserIds },
+          tenantId,
+          isActive: true,
+        },
       });
       if (c !== dto.assigneeUserIds.length) {
         throw new BadRequestException(

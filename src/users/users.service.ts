@@ -18,52 +18,90 @@ import { UpdateUserDto } from './dto/update-user.dto';
 // dacă una se schimbă.
 const BCRYPT_ROUNDS = 10;
 
-export type SafeUser = Omit<User, 'passwordHash'>;
+/**
+ * Identitatea (users) + accesul/rolul PE FIRMA CURENTĂ (user_tenant_access)
+ * — forma pe care o vede UsersController, scopat mereu la un singur
+ * tenant. Aceeași formă ca înainte de multi-firmă (docs/data-model.md),
+ * doar sursa lui `role`/`isActive` s-a mutat de pe `users` pe rândul de
+ * acces al firmei curente.
+ */
+export interface SafeUser {
+  id: string;
+  tenantId: string;
+  email: string;
+  fullName: string;
+  role: string;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+type AccessRow = { tenantId: string; role: string; isActive: boolean };
 
 /**
  * Management complet de useri (creare/listare/actualizare/dezactivare +
- * roluri per-modul), per decizia din sesiunea curentă — NU era încă
- * specificat în docs/ înainte de asta. Regula #6 din CLAUDE.md: fiecare
- * query filtrează explicit după tenantId — un owner/admin gestionează
- * DOAR userii propriei firme, niciodată cross-tenant.
+ * roluri per-modul), scopat mereu la o singură firmă — nucleu, ca
+ * src/auth/. Regula #6 din CLAUDE.md: fiecare query filtrează explicit
+ * după tenantId — un owner/admin gestionează DOAR accesul userilor la
+ * PROPRIA firmă, niciodată cross-tenant; el nu poate edita identitatea
+ * globală a unui user (email/parolă) decât dacă acel user are deja acces
+ * la firma lui — verificat mereu prin user_tenant_access, nu prin id gol.
+ *
+ * NU expune o cale de a acorda acces la firma curentă unui user EXISTENT
+ * (alt cont, altă firmă) prin simpla cunoaștere a email-ului lui — asta ar
+ * permite unui owner/admin să „importe" silențios, fără consimțământ, orice
+ * cont deja înregistrat pe platformă în propria firmă (depășește scopul
+ * documentat în docs/data-model.md, secțiunea „Multi-firmă": „un singur
+ * user accesează mai multe tenanți pe care EL ÎNSUȘI îi administrează", nu
+ * acces acordat unilateral de un tenant peste identitatea altcuiva). Un
+ * user ajunge să acceseze mai multe firme azi doar prin rânduri de acces
+ * create direct (seed/provisionare — la fel ca prima firmă a unui user, ce
+ * nu are încă o API de auto-creare) — un flux self-service cu confirmare
+ * din partea contului țintă (invitație) e de construit separat, doar la
+ * cerere reală, nu speculativ acum.
  */
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Creează un user NOU (identitate globală + primul lui rând de acces, pe firma curentă). */
   async create(tenantId: string, dto: CreateUserDto): Promise<SafeUser> {
     const email = dto.email.trim().toLowerCase(); // aceeași normalizare ca AuthService
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+    const role = dto.role ?? 'operator';
     try {
-      const user = await this.prisma.user.create({
-        data: {
-          tenantId,
-          email,
-          passwordHash,
-          fullName: dto.fullName,
-          role: dto.role ?? 'operator',
-        },
+      const user = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: { email, passwordHash, fullName: dto.fullName },
+        });
+        await tx.userTenantAccess.create({
+          data: { userId: created.id, tenantId, role },
+        });
+        return created;
       });
-      return this.omitPasswordHash(user);
+      return this.toSafeUser(user, { tenantId, role, isActive: true });
     } catch (err) {
       throw this.translateUniqueConstraint(err, email);
     }
   }
 
   async findAll(tenantId: string): Promise<SafeUser[]> {
-    const users = await this.prisma.user.findMany({
+    const rows = await this.prisma.userTenantAccess.findMany({
       where: { tenantId },
+      include: { user: true },
       orderBy: { createdAt: 'asc' },
     });
-    return users.map((u) => this.omitPasswordHash(u));
+    return rows.map((row) => this.toSafeUser(row.user, row));
   }
 
   async findOne(tenantId: string, id: string): Promise<SafeUser> {
-    const user = await this.prisma.user.findFirst({ where: { id, tenantId } });
-    if (!user) {
+    const row = await this.prisma.userTenantAccess.findFirst({
+      where: { tenantId, userId: id },
+      include: { user: true },
+    });
+    if (!row) {
       throw new NotFoundException(`Userul „${id}” nu există.`);
     }
-    return this.omitPasswordHash(user);
+    return this.toSafeUser(row.user, row);
   }
 
   async update(
@@ -74,16 +112,20 @@ export class UsersService {
   ): Promise<SafeUser> {
     // Tot blocul (citire rol curent + numărare alți owneri + scriere) într-
     // o singură tranzacție SERIALIZABLE — fix logic-reviewer: cu pașii
-    // separați (cum era înainte), două cereri concurente de dezactivare pe
-    // cei singuri 2 owneri activi ai unui tenant citeau amândouă „mai
-    // există 1 owner", treceau amândouă verificarea, și lăsau tenantul cu
-    // ZERO owneri activi. Serializable face ca Postgres să respingă
-    // (P2034) tranzacția care ar produce acest rezultat inconsistent —
-    // prinsă mai jos și tradusă într-un 409 clar, de reîncercat.
+    // separați, două cereri concurente de dezactivare pe cei singuri 2
+    // owneri activi ai unui tenant citeau amândouă „mai există 1 owner”,
+    // treceau amândouă verificarea, și lăsau tenantul cu ZERO owneri
+    // activi. Serializable face ca Postgres să respingă (P2034) tranzacția
+    // care ar produce acest rezultat inconsistent — prinsă mai jos și
+    // tradusă într-un 409 clar, de reîncercat. Regula, mutată de pe
+    // `users` pe `user_tenant_access`, scopată pe tenantId (vezi
+    // docs/data-model.md, secțiunea „Multi-firmă").
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          const target = await tx.user.findFirst({ where: { id, tenantId } });
+          const target = await tx.userTenantAccess.findFirst({
+            where: { tenantId, userId: id },
+          });
           if (!target) {
             throw new NotFoundException(`Userul „${id}” nu există.`);
           }
@@ -94,8 +136,8 @@ export class UsersService {
           // documentat în docs/data-model.md — fără nicio verificare
           // suplimentară față de restul câmpurilor din UpdateUserDto).
           if (dto.role === 'owner' && target.role !== 'owner') {
-            const caller = await tx.user.findFirst({
-              where: { id: callerUserId, tenantId },
+            const caller = await tx.userTenantAccess.findFirst({
+              where: { tenantId, userId: callerUserId },
             });
             if (caller?.role !== 'owner') {
               throw new ForbiddenException(
@@ -109,12 +151,12 @@ export class UsersService {
             ((dto.role !== undefined && dto.role !== 'owner') ||
               dto.isActive === false);
           if (losesOwnerStatus) {
-            const otherActiveOwners = await tx.user.count({
+            const otherActiveOwners = await tx.userTenantAccess.count({
               where: {
                 tenantId,
                 role: 'owner',
                 isActive: true,
-                id: { not: id },
+                userId: { not: id },
               },
             });
             if (otherActiveOwners === 0) {
@@ -124,16 +166,35 @@ export class UsersService {
             }
           }
 
-          const { count } = await tx.user.updateMany({
-            where: { id, tenantId },
-            data: dto,
-          });
-          if (count === 0) {
-            throw new NotFoundException(`Userul „${id}” nu există.`);
+          // fullName e identitate GLOBALĂ (users), nu proprietate a
+          // accesului la firma curentă — scris separat de role/isActive.
+          if (dto.fullName !== undefined) {
+            await tx.user.update({
+              where: { id },
+              data: { fullName: dto.fullName },
+            });
           }
-          return this.omitPasswordHash(
-            await tx.user.findFirstOrThrow({ where: { id, tenantId } }),
-          );
+
+          const accessData: Prisma.UserTenantAccessUpdateManyMutationInput = {};
+          if (dto.role !== undefined) accessData.role = dto.role;
+          if (dto.isActive !== undefined) accessData.isActive = dto.isActive;
+          if (Object.keys(accessData).length > 0) {
+            const { count } = await tx.userTenantAccess.updateMany({
+              where: { tenantId, userId: id },
+              data: accessData,
+            });
+            if (count === 0) {
+              throw new NotFoundException(`Userul „${id}” nu există.`);
+            }
+          }
+
+          const [user, access] = await Promise.all([
+            tx.user.findFirstOrThrow({ where: { id } }),
+            tx.userTenantAccess.findFirstOrThrow({
+              where: { tenantId, userId: id },
+            }),
+          ]);
+          return this.toSafeUser(user, access);
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -152,14 +213,24 @@ export class UsersService {
     id: string,
     newPassword: string,
   ): Promise<void> {
+    // Parola e identitate GLOBALĂ (users), nedelimitată de tenant — de-asta
+    // verificăm explicit accesul la firma curentă înainte de scriere,
+    // altfel un owner/admin ar putea reseta parola oricărui user din
+    // platformă doar ghicindu-i id-ul (breșă IDOR, regula #6 din
+    // CLAUDE.md). Verificare + scriere în ACEEAȘI tranzacție (fix logic-
+    // reviewer) — altfel un TOCTOU îngust: accesul revocat exact între
+    // citire și scriere (alt owner dezactivează concurent userul) tot ar
+    // lăsa reset-ul de parolă să treacă.
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-    const { count } = await this.prisma.user.updateMany({
-      where: { id, tenantId },
-      data: { passwordHash },
+    await this.prisma.$transaction(async (tx) => {
+      const access = await tx.userTenantAccess.findFirst({
+        where: { tenantId, userId: id },
+      });
+      if (!access) {
+        throw new NotFoundException(`Userul „${id}” nu există.`);
+      }
+      await tx.user.update({ where: { id }, data: { passwordHash } });
     });
-    if (count === 0) {
-      throw new NotFoundException(`Userul „${id}” nu există.`);
-    }
   }
 
   async assignModuleRole(
@@ -167,7 +238,7 @@ export class UsersService {
     userId: string,
     dto: AssignModuleRoleDto,
   ): Promise<UserModuleRole> {
-    await this.findOne(tenantId, userId); // 404 dacă userul nu există în tenant
+    await this.findOne(tenantId, userId); // 404 dacă userul n-are acces la tenant
     try {
       return await this.prisma.userModuleRole.upsert({
         where: {
@@ -211,28 +282,30 @@ export class UsersService {
     tenantId: string,
     userId: string,
   ): Promise<UserModuleRole[]> {
-    await this.findOne(tenantId, userId); // 404 dacă userul nu există în tenant
+    await this.findOne(tenantId, userId); // 404 dacă userul n-are acces la tenant
     return this.prisma.userModuleRole.findMany({
       where: { tenantId, userId },
       orderBy: { grantedAt: 'asc' },
     });
   }
 
-  private omitPasswordHash(user: User): SafeUser {
+  private toSafeUser(user: User, access: AccessRow): SafeUser {
     return {
       id: user.id,
-      tenantId: user.tenantId,
+      tenantId: access.tenantId,
       email: user.email,
       fullName: user.fullName,
-      role: user.role,
-      isActive: user.isActive,
+      role: access.role,
+      isActive: access.isActive,
       createdAt: user.createdAt,
     };
   }
 
   private translateUniqueConstraint(err: unknown, email: string): Error {
     if (this.isPrismaError(err, 'P2002')) {
-      return new ConflictException(`Există deja un user cu email „${email}”.`);
+      return new ConflictException(
+        `Există deja un user cu email „${email}” pe platformă.`,
+      );
     }
     return err as Error;
   }

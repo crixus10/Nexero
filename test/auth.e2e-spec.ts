@@ -31,10 +31,17 @@ describe('Auth (e2e)', () => {
       create: { name: 'E2E Auth Test Tenant', cui: TEST_CUI },
     });
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 4); // cost mic, doar test
-    await prisma.user.upsert({
+    // Identitate + acces la firmă în două tabele separate — multi-firmă
+    // (docs/data-model.md): users nu mai are tenant_id/role proprii.
+    const user = await prisma.user.upsert({
       where: { email: TEST_EMAIL },
-      update: { passwordHash, tenantId: tenant.id },
-      create: { email: TEST_EMAIL, passwordHash, tenantId: tenant.id },
+      update: { passwordHash },
+      create: { email: TEST_EMAIL, passwordHash },
+    });
+    await prisma.userTenantAccess.upsert({
+      where: { userId_tenantId: { userId: user.id, tenantId: tenant.id } },
+      update: { isActive: true },
+      create: { userId: user.id, tenantId: tenant.id, role: 'owner' },
     });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -63,6 +70,10 @@ describe('Auth (e2e)', () => {
   });
 
   afterAll(async () => {
+    // user_tenant_access ÎNAINTE de users/tenants (FK) — RESTRICT, nu CASCADE.
+    await prisma.userTenantAccess.deleteMany({
+      where: { user: { email: TEST_EMAIL } },
+    });
     await prisma.user.deleteMany({ where: { email: TEST_EMAIL } });
     await prisma.tenant.deleteMany({ where: { cui: TEST_CUI } });
     await prisma.$disconnect();

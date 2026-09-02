@@ -44,28 +44,23 @@ async function main(): Promise<void> {
   });
 
   const passwordHash = await bcrypt.hash(TEST_PASSWORD, SALT_ROUNDS);
-  // role: 'owner' — userul de test trebuie să poată gestiona alți useri
-  // (src/users/) și module-roles la testare locală, nu doar el să existe.
-  // Setat și pe `update` (nu doar `create`) — altfel un re-seed pe un user
-  // deja existent dintr-o rulare anterioară a script-ului (înainte ca
-  // full_name/role să existe ca și coloane) l-ar lăsa cu default-ul DB
-  // ('operator'), nu cu 'owner' — exact ce s-a întâmplat la verificarea
-  // manuală a acestei sesiuni.
+  // Identitate (users) — independentă de firmă, per docs/data-model.md,
+  // secțiunea „Multi-firmă". Accesul + rolul ('owner' — userul de test
+  // trebuie să poată gestiona alți useri, src/users/, și module-roles la
+  // testare locală) se scriu separat, în user_tenant_access mai jos.
   const testUser = await prisma.user.upsert({
     where: { email: TEST_EMAIL },
-    update: {
-      passwordHash,
-      tenantId: tenant.id,
-      fullName: 'Owner Demo',
-      role: 'owner',
-    },
-    create: {
-      email: TEST_EMAIL,
-      passwordHash,
-      tenantId: tenant.id,
-      fullName: 'Owner Demo',
-      role: 'owner',
-    },
+    update: { passwordHash, fullName: 'Owner Demo' },
+    create: { email: TEST_EMAIL, passwordHash, fullName: 'Owner Demo' },
+  });
+  // Setat și pe `update` (nu doar `create`) — altfel un re-seed pe un user
+  // deja existent dintr-o rulare anterioară a script-ului l-ar lăsa cu
+  // default-ul DB ('operator'), nu cu 'owner' — exact ce s-a întâmplat la
+  // verificarea manuală a sesiunii care a introdus role/isActive.
+  await prisma.userTenantAccess.upsert({
+    where: { userId_tenantId: { userId: testUser.id, tenantId: tenant.id } },
+    update: { role: 'owner', isActive: true },
+    create: { userId: testUser.id, tenantId: tenant.id, role: 'owner' },
   });
 
   // Catalog modulul 1 (Facturare) — preț din docs/pricing.md, pachetul

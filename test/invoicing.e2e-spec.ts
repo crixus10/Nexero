@@ -53,13 +53,25 @@ describe('Invoicing module — access control (e2e)', () => {
       update: {},
       create: { name: 'E2E Invoicing Entitled Tenant', cui: ENTITLED_CUI },
     });
-    await prisma.user.upsert({
+    // Identitate + acces la firmă în două tabele separate — multi-firmă
+    // (docs/data-model.md): users nu mai are tenant_id/role proprii.
+    const entitledUserUpsert = await prisma.user.upsert({
       where: { email: ENTITLED_EMAIL },
-      update: { passwordHash, tenantId: entitledTenant.id },
+      update: { passwordHash },
+      create: { email: ENTITLED_EMAIL, passwordHash },
+    });
+    await prisma.userTenantAccess.upsert({
+      where: {
+        userId_tenantId: {
+          userId: entitledUserUpsert.id,
+          tenantId: entitledTenant.id,
+        },
+      },
+      update: { isActive: true },
       create: {
-        email: ENTITLED_EMAIL,
-        passwordHash,
+        userId: entitledUserUpsert.id,
         tenantId: entitledTenant.id,
+        role: 'owner',
       },
     });
     // Modulul 'invoicing' e presupus deja existent (prisma/seed.ts) — nu-l
@@ -123,13 +135,23 @@ describe('Invoicing module — access control (e2e)', () => {
         cui: NOT_ENTITLED_CUI,
       },
     });
-    await prisma.user.upsert({
+    const notEntitledUserUpsert = await prisma.user.upsert({
       where: { email: NOT_ENTITLED_EMAIL },
-      update: { passwordHash, tenantId: notEntitledTenant.id },
+      update: { passwordHash },
+      create: { email: NOT_ENTITLED_EMAIL, passwordHash },
+    });
+    await prisma.userTenantAccess.upsert({
+      where: {
+        userId_tenantId: {
+          userId: notEntitledUserUpsert.id,
+          tenantId: notEntitledTenant.id,
+        },
+      },
+      update: { isActive: true },
       create: {
-        email: NOT_ENTITLED_EMAIL,
-        passwordHash,
+        userId: notEntitledUserUpsert.id,
         tenantId: notEntitledTenant.id,
+        role: 'owner',
       },
     });
 
@@ -175,6 +197,11 @@ describe('Invoicing module — access control (e2e)', () => {
     // înaintea userilor, altfel prisma.user.deleteMany de mai jos eșuează
     // pe încălcare de FK.
     await prisma.userModuleRole.deleteMany({
+      where: { tenant: { cui: { in: [ENTITLED_CUI, NOT_ENTITLED_CUI] } } },
+    });
+    // user_tenant_access.user_id/tenant_id sunt ON DELETE RESTRICT — la fel
+    // ca user_module_roles mai sus, trebuie șters înaintea userilor/firmelor.
+    await prisma.userTenantAccess.deleteMany({
       where: { tenant: { cui: { in: [ENTITLED_CUI, NOT_ENTITLED_CUI] } } },
     });
     await prisma.user.deleteMany({

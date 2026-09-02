@@ -1,6 +1,6 @@
 ---
 name: rbac-guardian
-description: Verifică simetria și corectitudinea nucleului RBAC (src/rbac/, src/users/) — cele două guard-uri globale (GlobalRoleGuard pe users.role, ModuleRoleGuard pe user_module_roles) trebuie să aplice ACELEAȘI garanții de bază (user activ, tenant izolat, citire live din DB), nu doar fiecare separat corect. Se invocă după orice modificare în src/rbac/ sau src/users/. Read-only.
+description: Verifică simetria și corectitudinea nucleului RBAC (src/rbac/, src/users/) — cele două guard-uri globale (GlobalRoleGuard pe user_tenant_access.role — fostul users.role, ModuleRoleGuard pe user_module_roles) trebuie să aplice ACELEAȘI garanții de bază (user activ, tenant izolat, citire live din DB), nu doar fiecare separat corect. Se invocă după orice modificare în src/rbac/ sau src/users/. Read-only.
 tools: Read, Glob, Grep
 ---
 
@@ -36,9 +36,12 @@ Verifică codul din `src/rbac/` și `src/users/` pe aceste puncte:
    `docs/data-model.md`: „efectul e imediat, nu așteaptă expirarea unui
    token deja emis").
 3. **tenant_id peste tot** — orice query din `RbacService`/`UsersService`
-   pe `users`/`user_module_roles` filtrează explicit după `tenantId`, chiar
-   dacă `id`-ul e deja un UUID unic global — un user din tenant A nu
-   trebuie să poată verifica/influența roluri din tenant B.
+   pe `user_tenant_access`/`user_module_roles` filtrează explicit după
+   `tenantId`, chiar dacă `id`-ul e deja un UUID unic global — un user din
+   tenant A nu trebuie să poată verifica/influența roluri din tenant B.
+   `users` NU are `tenant_id` propriu (identitate globală, per
+   `docs/data-model.md`, secțiunea „Multi-firmă") — nu căuta acest filtru
+   direct pe `users`, ci pe rândul lui de acces din `user_tenant_access`.
 4. **Protecția „ultimul owner activ"** (`UsersService.update`, sau
    echivalentul curent) — verifică dacă blocul de verificare+scriere e
    atomic (tranzacție cu izolare suficientă, ex. Serializable, sau
